@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from sqlalchemy import delete
@@ -19,6 +20,8 @@ from .schema import (
 )
 from .vector_backend import PgVectorBackend
 
+logger = logging.getLogger(__name__)
+
 
 def _build_photo_model(row: PhotoFileRow) -> PhotoFile:
     return PhotoFile(
@@ -37,6 +40,18 @@ def _load_exif_model(row: Optional[ExifDataRow]) -> Optional[ExifData]:
         datetime_original=row.datetime_original,
         gps_lat=row.gps_lat,
         gps_lon=row.gps_lon,
+        gps_altitude=row.gps_altitude,
+        gps_altitude_ref=row.gps_altitude_ref,
+        gps_timestamp=row.gps_timestamp,
+        camera_make=row.camera_make,
+        camera_model=row.camera_model,
+        lens_model=row.lens_model,
+        software=row.software,
+        orientation=row.orientation,
+        exposure_time=row.exposure_time,
+        f_number=row.f_number,
+        iso=row.iso,
+        focal_length=row.focal_length,
     )
 
 
@@ -51,6 +66,7 @@ def index_photo(
     exif_model = _load_exif_model(photo_row.exif)
     photo_model = _build_photo_model(photo_row)
 
+    logger.info("Index: describing photo %s", photo_row.id)
     vision: VisionDescription = describe_photo(photo_model, exif_model)
     existing_vision = session.get(VisionDescriptionRow, photo_row.id)
     if existing_vision:
@@ -67,6 +83,7 @@ def index_photo(
             )
         )
 
+    logger.info("Index: classifying photo %s", photo_row.id)
     classifications = classify_photo(photo_model, exif_model)
     session.execute(
         delete(ClassificationRow).where(ClassificationRow.photo_id == photo_row.id)
@@ -84,6 +101,7 @@ def index_photo(
     session.execute(
         delete(FaceDetectionRow).where(FaceDetectionRow.photo_id == photo_row.id)
     )
+    logger.info("Index: detecting faces for photo %s", photo_row.id)
     detections = detect_faces(photo_model)
     identities = recognize_faces(detections)
     for idx, detection in enumerate(detections):
@@ -108,6 +126,15 @@ def index_photo(
                 )
             )
 
+    logger.info("Index: embedding description for photo %s", photo_row.id)
     embedding = embed_description(vision.description, photo_id=photo_row.id)
     backend.upsert_embedding(session, embedding)
     session.commit()
+    logger.info(
+        "Index: completed photo %s (vision model=%s, %d classes, %d faces, embed model=%s)",
+        photo_row.id,
+        vision.model,
+        len(classifications),
+        len(detections),
+        embedding.model,
+    )

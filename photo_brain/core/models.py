@@ -18,6 +18,18 @@ class ExifData(BaseModel):
     datetime_original: Optional[datetime] = None
     gps_lat: Optional[float] = None
     gps_lon: Optional[float] = None
+    gps_altitude: Optional[float] = None
+    gps_altitude_ref: Optional[int] = None
+    gps_timestamp: Optional[datetime] = None
+    camera_make: Optional[str] = None
+    camera_model: Optional[str] = None
+    lens_model: Optional[str] = None
+    software: Optional[str] = None
+    orientation: Optional[int] = None
+    exposure_time: Optional[float] = None
+    f_number: Optional[float] = None
+    iso: Optional[int] = None
+    focal_length: Optional[float] = None
 
 
 class VisionDescription(BaseModel):

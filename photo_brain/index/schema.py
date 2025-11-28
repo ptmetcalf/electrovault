@@ -86,6 +86,18 @@ class ExifDataRow(Base):
     )
     gps_lat: Mapped[Optional[float]] = mapped_column(Float)
     gps_lon: Mapped[Optional[float]] = mapped_column(Float)
+    gps_altitude: Mapped[Optional[float]] = mapped_column(Float)
+    gps_altitude_ref: Mapped[Optional[int]] = mapped_column(Integer)
+    gps_timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    camera_make: Mapped[Optional[str]] = mapped_column(String)
+    camera_model: Mapped[Optional[str]] = mapped_column(String)
+    lens_model: Mapped[Optional[str]] = mapped_column(String)
+    software: Mapped[Optional[str]] = mapped_column(String)
+    orientation: Mapped[Optional[int]] = mapped_column(Integer)
+    exposure_time: Mapped[Optional[float]] = mapped_column(Float)
+    f_number: Mapped[Optional[float]] = mapped_column(Float)
+    iso: Mapped[Optional[int]] = mapped_column(Integer)
+    focal_length: Mapped[Optional[float]] = mapped_column(Float)
 
     photo: Mapped[PhotoFileRow] = relationship(back_populates="exif")
 

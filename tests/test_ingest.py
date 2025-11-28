@@ -13,6 +13,16 @@ def _make_image(path: Path, with_exif: bool = False) -> None:
     if with_exif:
         exif = Image.Exif()
         exif[36867] = "2021:01:02 03:04:05"
+        exif[306] = "2021:01:02 03:04:05"  # fallback DateTime
+        exif[271] = "TestMake"
+        exif[272] = "TestModel"
+        exif[305] = "UnitTestSoftware"
+        exif[274] = 1  # Orientation
+        exif[33434] = (1, 60)  # ExposureTime 1/60s
+        exif[33437] = (4, 1)  # FNumber f/4
+        exif[34855] = 200  # ISO
+        exif[37386] = (35, 1)  # FocalLength 35mm
+        exif[42036] = "TestLens"
         img.save(path, exif=exif)
     else:
         img.save(path)
@@ -38,6 +48,15 @@ def test_read_exif_parses_datetime(tmp_path: Path) -> None:
     exif = read_exif(file_path)
     assert exif.datetime_original is not None
     assert exif.datetime_original.year == 2021
+    assert exif.camera_make == "TestMake"
+    assert exif.camera_model == "TestModel"
+    assert exif.software == "UnitTestSoftware"
+    assert exif.orientation == 1
+    assert exif.iso == 200
+    assert exif.focal_length == 35.0
+    assert exif.f_number == 4.0
+    assert exif.exposure_time == 1 / 60
+    assert exif.lens_model == "testlens"
 
 
 def test_ingest_directory_upserts(tmp_path: Path) -> None:

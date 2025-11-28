@@ -124,3 +124,11 @@ This starts:
 6) **Hot code editing tips**  
    - Keep `uvicorn --reload` running; re-run ingest if you change ingest/index logic or add new photos.  
    - SQLite (`photo_brain.db`) is convenient for dev; switch to Postgres via `DATABASE_URL` when you need vector-native behavior.
+
+### CLI ingest script
+
+- Run the helper (loads `.env` automatically):  
+  `python scripts/ingest.py /absolute/path/to/photos`
+- Override DB inline if desired:  
+  `DATABASE_URL=sqlite+pysqlite:///./photo_brain.db python scripts/ingest.py ~/Pictures`
+- Note: the path must exist on the local filesystem. If you have a network share (SMB/UNC like `//host/share`), mount it first to a local path (e.g., `/mnt/photos`) and point the script there.

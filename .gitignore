@@ -34,3 +34,6 @@ photo_brain.db
 
 # Local env
 .env
+
+# Local scratch/test folders
+phototest/
