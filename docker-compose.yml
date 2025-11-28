@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  db:
+    image: ankane/pgvector
+    environment:
+      POSTGRES_USER: photobrain
+      POSTGRES_PASSWORD: photobrain
+      POSTGRES_DB: photo_brain
+    ports:
+      - "5432:5432"
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://photobrain:photobrain@db:5432/photo_brain
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+    restart: unless-stopped

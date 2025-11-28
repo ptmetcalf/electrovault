@@ -1,0 +1,23 @@
+[project]
+name = "photo-brain"
+version = "0.1.1"
+description = "Local-first photo understanding and search engine"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.6,<3",
+    "sqlalchemy>=2.0,<3",
+    "fastapi>=0.110,<1",
+    "pillow>=10,<11",
+    "psycopg[binary]>=3.1,<4",
+    "uvicorn>=0.23,<1",
+    "python-dotenv>=1.0,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4,<9",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
