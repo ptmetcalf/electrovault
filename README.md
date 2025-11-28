@@ -31,7 +31,9 @@ If you previously installed before the dev extra was added, clear the old editab
   `DATABASE_URL=postgresql+psycopg://user:pass@localhost:5432/photo_brain`
 - Launch the operator UI + API:  
   `uvicorn photo_brain.api.http_api:app --host 0.0.0.0 --port 8000`
-- Open `http://localhost:8000` for the search UI or hit `/events` for event summaries.
+- Open `http://localhost:8000` for the React UI or hit `/events` for event summaries. The backend auto-ingests the `phototest/` directory by default; set `AUTO_INGEST_DIR=/absolute/path` to change it.
+  - Auto-ingest skips unchanged photos (same mtime/context); set `AUTO_INGEST_FORCE=1` to force re-index on startup. Use `AUTO_INGEST_CONTEXT` to inject user context during auto-ingest.
+  - Thumbnails: `GET /thumb/{photo_id}` returns a JPEG thumbnail (max size controlled by `THUMB_MAX_SIZE`, default 320).
 
 ## Using Local Vision + Embedding Models (Ollama/LM Studio)
 
@@ -68,7 +70,7 @@ print("Ingest complete")
 PY
 ```
 
-After ingest, start the API/UI (`uvicorn photo_brain.api.http_api:app --host 0.0.0.0 --port 8000`) and search via `http://localhost:8000`.
+After ingest, start the API (`uvicorn photo_brain.api.http_api:app --host 0.0.0.0 --port 8000`) and search via `http://localhost:8000`. The UI is built from the `frontend/` React app (`cd frontend && npm install && npm run build`). On startup, the API will ingest `phototest/` (or `AUTO_INGEST_DIR` if set).
 
 ## Docker
 

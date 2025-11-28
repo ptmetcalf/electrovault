@@ -111,6 +111,7 @@ class VisionDescriptionRow(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[Optional[str]] = mapped_column(String)
     confidence: Mapped[Optional[float]] = mapped_column(Float)
+    user_context: Mapped[Optional[str]] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

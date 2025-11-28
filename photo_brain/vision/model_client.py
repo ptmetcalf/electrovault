@@ -226,6 +226,8 @@ def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Opti
     text = _strip_wrappers(raw)
     if not text:
         raise LocalModelError("Empty response from vision model")
+
+    parsed: Any = None
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
@@ -233,20 +235,18 @@ def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Opti
         if match:
             try:
                 parsed = json.loads(match.group(0))
-            except json.JSONDecodeError as exc:
-                raise LocalModelError(f"Invalid JSON from model: {exc}") from exc
-        else:
-            raise LocalModelError("Model did not return JSON")
+            except json.JSONDecodeError:
+                parsed = None
 
-    if not isinstance(parsed, dict):
-        raise LocalModelError("Model did not return JSON object")
-    try:
-        validated = _LLMResponse.model_validate(parsed)
-    except ValidationError as exc:
-        raise LocalModelError(f"Invalid LLM response: {exc}") from exc
+    validated: _LLMResponse | None = None
+    if isinstance(parsed, dict):
+        try:
+            validated = _LLMResponse.model_validate(parsed)
+        except ValidationError:
+            validated = None
 
     results: List[Tuple[str, Optional[float]]] = []
-    ocr_texts: List[str] = validated.ocr_text
+    ocr_texts: List[str] = validated.ocr_text if validated else []
     seen: set[str] = set()
     max_labels = 20
 
@@ -263,64 +263,81 @@ def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Opti
         seen.add(key)
         results.append((key, _normalize_conf(conf)))
 
-    for tag in validated.labels:
-        _add_label(None, tag.label, tag.confidence)
+    if validated:
+        for tag in validated.labels:
+            _add_label(None, tag.label, tag.confidence)
 
-    for tag in validated.objects:
-        _add_label("object", tag.label, tag.confidence)
+        for tag in validated.objects:
+            _add_label("object", tag.label, tag.confidence)
 
-    for scene in validated.scene:
-        _add_label("scene", scene, 0.8)
-    for act in validated.activities:
-        _add_label("activity", act, 0.8)
-    for event in validated.events:
-        _add_label("event", event, 0.8)
-    for color in validated.colors:
-        _add_label("color", color, 0.6)
-    for brand in validated.brands:
-        _add_label("brand", brand, 0.8)
-    if validated.time_of_day:
-        _add_label("time", validated.time_of_day, 0.7)
-    if validated.weather:
-        _add_label("weather", validated.weather, 0.7)
+        for scene in validated.scene:
+            _add_label("scene", scene, 0.8)
+        for act in validated.activities:
+            _add_label("activity", act, 0.8)
+        for event in validated.events:
+            _add_label("event", event, 0.8)
+        for color in validated.colors:
+            _add_label("color", color, 0.6)
+        for brand in validated.brands:
+            _add_label("brand", brand, 0.8)
+        if validated.time_of_day:
+            _add_label("time", validated.time_of_day, 0.7)
+        if validated.weather:
+            _add_label("weather", validated.weather, 0.7)
 
-    people = validated.people or {}
-    count = people.get("count")
-    if isinstance(count, int):
-        _add_label("people-count", str(count), 0.9)
-    for attr in people.get("attributes", []) or []:
-        if isinstance(attr, str):
-            _add_label("people-attr", attr, 0.7)
-    for age in people.get("age_bands", []) or []:
-        if isinstance(age, str):
-            _add_label("age-band", age, 0.7)
-    for gender in people.get("genders", []) or []:
-        if isinstance(gender, str):
-            _add_label("gender", gender, 0.7)
+        people = validated.people or {}
+        count = people.get("count")
+        if isinstance(count, int):
+            _add_label("people-count", str(count), 0.9)
+        for attr in people.get("attributes", []) or []:
+            if isinstance(attr, str):
+                _add_label("people-attr", attr, 0.7)
+        for age in people.get("age_bands", []) or []:
+            if isinstance(age, str):
+                _add_label("age-band", age, 0.7)
+        for gender in people.get("genders", []) or []:
+            if isinstance(gender, str):
+                _add_label("gender", gender, 0.7)
 
-    counts = validated.counts or {}
-    pets = counts.get("pets")
-    if isinstance(pets, int):
-        _add_label("pets-count", str(pets), 0.9)
+        counts = validated.counts or {}
+        pets = counts.get("pets")
+        if isinstance(pets, int):
+            _add_label("pets-count", str(pets), 0.9)
 
-    quality = validated.quality or {}
-    blur = quality.get("blur")
-    blur_conf = _normalize_conf(blur)
-    if blur_conf is not None:
-        if blur_conf >= 0.66:
-            _add_label("quality", "blur-high", blur_conf)
-        elif blur_conf >= 0.33:
-            _add_label("quality", "blur-medium", blur_conf)
-        else:
-            _add_label("quality", "blur-low", blur_conf)
-    lighting = quality.get("lighting")
-    if isinstance(lighting, str):
-        _add_label("quality", f"lighting-{lighting}", 0.7)
-    composition = quality.get("composition")
-    if isinstance(composition, list):
-        for comp in composition:
-            if isinstance(comp, str):
-                _add_label("quality", f"composition-{comp}", 0.7)
+        quality = validated.quality or {}
+        blur = quality.get("blur")
+        blur_conf = _normalize_conf(blur)
+        if blur_conf is not None:
+            if blur_conf >= 0.66:
+                _add_label("quality", "blur-high", blur_conf)
+            elif blur_conf >= 0.33:
+                _add_label("quality", "blur-medium", blur_conf)
+            else:
+                _add_label("quality", "blur-low", blur_conf)
+        lighting = quality.get("lighting")
+        if isinstance(lighting, str):
+            _add_label("quality", f"lighting-{lighting}", 0.7)
+        composition = quality.get("composition")
+        if isinstance(composition, list):
+            for comp in composition:
+                if isinstance(comp, str):
+                    _add_label("quality", f"composition-{comp}", 0.7)
+
+    # Fallback parsing if structured JSON fails to yield labels.
+    if not results:
+        tokens = re.split(r"[,\n]", text)
+        for tok in tokens:
+            tok = tok.strip()
+            if not tok:
+                continue
+            if ":" in tok:
+                cat, val = tok.split(":", 1)
+                _add_label(cat.strip(), val.strip(), None)
+            else:
+                _add_label(None, tok, None)
+
+    if not results:
+        raise LocalModelError("No usable labels from vision model")
 
     return results, ocr_texts
 

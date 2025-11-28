@@ -61,6 +61,14 @@ OBJECTS = {
     "stairs",
     "wall",
     "floor",
+    "fridge",
+    "refrigerator",
+    "oven",
+    "stove",
+    "microwave",
+    "sink",
+    "toilet",
+    "bathtub",
     "phone",
     "laptop",
     "computer",
@@ -212,7 +220,10 @@ SYNONYMS: dict[str, Canonical] = {
     "handbag": ("object", "purse"),
     "snow": ("scene", "outdoor"),
     "snowy": ("scene", "outdoor"),
-    "fridge": ("object", "refrigerator") if False else ("object", "fridge"),  # placeholder mapping
+    "refrigerator": ("object", "fridge"),
+    "freezer": ("object", "fridge"),
+    "microwave oven": ("object", "microwave"),
+    "stovetop": ("object", "stove"),
     # activities
     "taking photo": ("activity", "posing"),
     "taking picture": ("activity", "posing"),
@@ -300,6 +311,23 @@ def map_label(prefix: Optional[str], value: str) -> Optional[Canonical]:
 
     # If no prefix, allow limited unprefixed tags for compatibility.
     if cat is None:
+        # Try to infer category by membership in vocab sets (priority order).
+        if v in SCENES:
+            return "scene", v
+        if v in OBJECTS:
+            return "object", v
+        if v in ACTIVITIES:
+            return "activity", v
+        if v in EVENTS:
+            return "event", v
+        if v in COLORS:
+            return "color", v
+        if v in BRANDS:
+            return "brand", v
+        if v in TIME_OF_DAY:
+            return "time", v
+        if v in WEATHER:
+            return "weather", v
         if v in {"portrait", "selfie", "group", "family", "pet", "child", "adult"}:
             return None, v
     return None

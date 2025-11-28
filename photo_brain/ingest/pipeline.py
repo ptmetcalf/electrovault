@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,7 @@ from photo_brain.core.models import ExifData, PhotoFile
 from photo_brain.index import ExifDataRow, PhotoFileRow
 from photo_brain.index.indexer import index_photo
 from photo_brain.index.vector_backend import PgVectorBackend
+from photo_brain.ingest.thumbnailer import build_thumbnail
 
 from .exif_reader import read_exif
 from .scanner import scan_photos
@@ -89,11 +91,19 @@ def ingest_directory(root: str | Path, session: Session) -> list[PhotoFileRow]:
 
 
 def ingest_and_index(
-    root: str | Path, session: Session, *, backend: PgVectorBackend | None = None
+    root: str | Path,
+    session: Session,
+    *,
+    backend: PgVectorBackend | None = None,
+    context: str | None = None,
+    skip_if_fresh: bool = True,
 ) -> list[PhotoFileRow]:
     """Full ingest pipeline: scan, persist, and generate metadata/embeddings."""
     backend = backend or PgVectorBackend()
+    thumb_cache = Path(os.getenv("THUMB_CACHE_DIR", Path(__file__).resolve().parents[2] / "thumbnails"))
+    thumb_max = int(os.getenv("THUMB_MAX_SIZE", "320"))
     rows = ingest_directory(root, session)
     for row in rows:
-        index_photo(session, row, backend=backend)
+        build_thumbnail(Path(row.path), row.id, thumb_cache, max_size=thumb_max)
+        index_photo(session, row, backend=backend, context=context, skip_if_fresh=skip_if_fresh)
     return rows

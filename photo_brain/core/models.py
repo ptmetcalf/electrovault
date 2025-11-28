@@ -37,6 +37,7 @@ class VisionDescription(BaseModel):
     description: str
     model: Optional[str] = None
     confidence: Optional[float] = None
+    user_context: Optional[str] = None
     created_at: Optional[datetime] = None
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from photo_brain.core.models import Classification, ExifData, PhotoFile, VisionDescription
@@ -60,19 +60,41 @@ def index_photo(
     photo_row: PhotoFileRow,
     *,
     backend: Optional[PgVectorBackend] = None,
+    context: str | None = None,
+    skip_if_fresh: bool = True,
 ) -> None:
     """Generate vision, classifications, and embeddings for a photo."""
     backend = backend or PgVectorBackend()
     exif_model = _load_exif_model(photo_row.exif)
     photo_model = _build_photo_model(photo_row)
 
+    existing_vision = session.get(VisionDescriptionRow, photo_row.id)
+    if skip_if_fresh and existing_vision and existing_vision.user_context == context:
+        class_count = session.scalar(
+            select(func.count())
+            .select_from(ClassificationRow)
+            .where(ClassificationRow.photo_id == photo_row.id)
+        )
+        if class_count and existing_vision.created_at:
+            mtime = photo_row.mtime
+            created = existing_vision.created_at
+            # Normalize timezone awareness before comparing
+            if mtime.tzinfo and created.tzinfo is None:
+                created = created.replace(tzinfo=mtime.tzinfo)
+            elif created.tzinfo and mtime.tzinfo is None:
+                mtime = mtime.replace(tzinfo=created.tzinfo)
+            if mtime <= created:
+                logger.info("Index: skipping photo %s (unchanged, context matched)", photo_row.id)
+                return
+
     logger.info("Index: describing photo %s", photo_row.id)
-    vision: VisionDescription = describe_photo(photo_model, exif_model)
+    vision: VisionDescription = describe_photo(photo_model, exif_model, context=context)
     existing_vision = session.get(VisionDescriptionRow, photo_row.id)
     if existing_vision:
         existing_vision.description = vision.description
         existing_vision.model = vision.model
         existing_vision.confidence = vision.confidence
+        existing_vision.user_context = context
     else:
         session.add(
             VisionDescriptionRow(
@@ -80,11 +102,12 @@ def index_photo(
                 description=vision.description,
                 model=vision.model,
                 confidence=vision.confidence,
+                user_context=context,
             )
         )
 
     logger.info("Index: classifying photo %s", photo_row.id)
-    classifications = classify_photo(photo_model, exif_model)
+    classifications = classify_photo(photo_model, exif_model, context=context)
     session.execute(
         delete(ClassificationRow).where(ClassificationRow.photo_id == photo_row.id)
     )
