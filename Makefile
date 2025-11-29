@@ -1,0 +1,46 @@
+VENV ?= .venv
+PYTHON ?= $(VENV)/bin/python
+PIP ?= $(VENV)/bin/pip
+
+.PHONY: help venv install lint format test test-cov api frontend-install frontend-dev frontend-build ingest-sample
+
+help: ## List available make commands
+	@echo "Available make commands:"
+	@grep -E '^[a-zA-Z0-9_-]+:.*##' Makefile | sort | awk 'BEGIN {FS=":.*##"} {printf "  %-18s %s\n", $$1, $$2}'
+
+venv: ## Create virtual environment at $(VENV)
+	python3 -m venv $(VENV)
+
+install: venv ## Install Python deps and frontend deps
+	$(PIP) install --upgrade pip
+	$(PIP) install -e ".[dev]"
+	cd frontend && npm install
+
+lint: ## Run Python (ruff) and frontend (eslint) linters
+	$(VENV)/bin/ruff check .
+	cd frontend && npm run lint
+
+format: ## Format Python code (black + ruff --fix)
+	$(VENV)/bin/black .
+	$(VENV)/bin/ruff check --fix .
+
+test: ## Run pytest
+	$(VENV)/bin/pytest -q
+
+test-cov: ## Run pytest with coverage report
+	$(VENV)/bin/pytest --cov=photo_brain --cov-report=term
+
+api: ## Start FastAPI server on port 8000
+	$(PYTHON) -m uvicorn photo_brain.api.http_api:app --host 0.0.0.0 --port 8000
+
+frontend-install: ## Install frontend dependencies
+	cd frontend && npm install
+
+frontend-dev: ## Run Vite dev server
+	cd frontend && npm run dev
+
+frontend-build: ## Build frontend assets
+	cd frontend && npm run build
+
+ingest-sample: ## Ingest sample phototest directory
+	$(PYTHON) scripts/ingest.py $(PWD)/phototest

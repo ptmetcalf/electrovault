@@ -219,6 +219,10 @@ button:hover {
   font-size: 13px;
 }
 
+.pager {
+  margin-top: 12px;
+}
+
 .thumb {
   border-radius: 12px;
   overflow: hidden;

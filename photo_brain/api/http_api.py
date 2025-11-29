@@ -2,11 +2,12 @@ import os
 from io import BytesIO
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from photo_brain.core.env import configure_logging, load_dotenv_if_present
@@ -235,6 +236,30 @@ def reindex_pending(req: BulkIndexRequest, session: Session = Depends(get_sessio
         only_missing=True,
     )
     return {"processed": count}
+
+
+@app.get("/photos")
+def list_photos(
+    *,
+    limit: int = Query(24, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session),
+) -> dict:
+    total = session.scalar(select(func.count()).select_from(PhotoFileRow))
+    rows = (
+        session.scalars(
+            select(PhotoFileRow).order_by(PhotoFileRow.mtime.desc()).offset(offset).limit(limit)
+        ).all()
+        if total
+        else []
+    )
+    records = [load_photo_record(session, row.id) for row in rows]
+    return {
+        "photos": [rec.model_dump() for rec in records if rec],
+        "total": int(total or 0),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @app.get("/", response_class=HTMLResponse)

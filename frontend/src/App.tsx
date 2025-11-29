@@ -35,7 +35,7 @@ type PhotoRecord = {
 
 type SearchResult = {
   record: PhotoRecord;
-  score: number;
+  score: number | null;
 };
 
 type EventSummary = {
@@ -46,10 +46,16 @@ type EventSummary = {
 
 const API_BASE = "";
 const formatScore = (score: number) => score.toFixed(3);
+const PAGE_SIZE = 48;
 
 export default function App() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [mode, setMode] = useState<"search" | "browse">("search");
+  const [browseRecords, setBrowseRecords] = useState<PhotoRecord[]>([]);
+  const [browseTotal, setBrowseTotal] = useState(0);
+  const [browsePage, setBrowsePage] = useState(0);
+  const [browseLoading, setBrowseLoading] = useState(false);
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,10 +68,21 @@ export default function App() {
   const [contextDraft, setContextDraft] = useState("");
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [hoverDetectionId, setHoverDetectionId] = useState<number | null>(null);
+  const [maintenanceStatus, setMaintenanceStatus] = useState<string | null>(null);
+  const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
+  const [preserveFaces, setPreserveFaces] = useState(true);
+
+  const cards = useMemo(() => {
+    if (mode === "browse") {
+      return browseRecords.map((rec) => ({ record: rec, score: null as number | null }));
+    }
+    return results;
+  }, [mode, browseRecords, results]);
 
   const labelBadges = useMemo(() => {
-    return results.flatMap((r) => r.record.classifications.map((c) => c.label));
-  }, [results]);
+    const source = mode === "browse" ? browseRecords : results.map((r) => r.record);
+    return source.flatMap((r) => r.classifications.map((c) => c.label));
+  }, [mode, browseRecords, results]);
 
   const facesByDetection = useMemo(() => {
     const map = new Map<number, Face>();
@@ -192,10 +209,13 @@ export default function App() {
   }
 
   async function search(q: string) {
+    setMode("search");
     setLoading(true);
     setError(null);
     setSelectedPhoto(null);
     setSelectedScore(null);
+    setBrowseRecords([]);
+    setBrowseTotal(0);
     try {
       const res = await fetch(`${API_BASE}/search`, {
         method: "POST",
@@ -210,6 +230,75 @@ export default function App() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function browse(page: number) {
+    setMode("browse");
+    setBrowseLoading(true);
+    setError(null);
+    setSelectedPhoto(null);
+    setSelectedScore(null);
+    setResults([]);
+    try {
+      const res = await fetch(`${API_BASE}/photos?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setBrowseRecords(data.photos || []);
+      setBrowseTotal(data.total || 0);
+      setBrowsePage(page);
+    } catch (err) {
+      setError("Browse failed");
+      console.error(err);
+    } finally {
+      setBrowseLoading(false);
+    }
+  }
+
+  async function runReindex(kind: "pending" | "full") {
+    setMaintenanceStatus(`Running ${kind} reindex...`);
+    setMaintenanceError(null);
+    try {
+      const res = await fetch(`${API_BASE}/reindex/${kind}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setMaintenanceStatus(`Reindex ${kind} processed ${data.processed ?? "?"} photos`);
+    } catch (err) {
+      console.error(err);
+      setMaintenanceStatus(null);
+      setMaintenanceError(`Reindex ${kind} failed`);
+    }
+  }
+
+  async function reindexSelected() {
+    if (!selectedPhoto) return;
+    setPhotoLoading(true);
+    setSelectedError(null);
+    try {
+      const res = await fetch(`${API_BASE}/reindex`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          photo_id: selectedPhoto.file.id,
+          preserve_faces: preserveFaces,
+          context: contextDraft || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.photo) {
+        hydrateSelection(data.photo, selectedScore ?? undefined);
+        updateResultRecord(data.photo);
+      }
+    } catch (err) {
+      console.error(err);
+      setSelectedError("Reindex failed");
+    } finally {
+      setPhotoLoading(false);
     }
   }
 
@@ -232,7 +321,7 @@ export default function App() {
             <h3>Search</h3>
             <div className="stat">
               <div className="label">Results</div>
-              <div className="value">{results.length}</div>
+              <div className="value">{mode === "browse" ? browseTotal : results.length}</div>
             </div>
           </div>
           <form
@@ -255,9 +344,20 @@ export default function App() {
               <button
                 type="button"
                 className="secondary"
+                onClick={() => browse(0)}
+                disabled={browseLoading}
+              >
+                {browseLoading ? "Browsing..." : "Browse all"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
                 onClick={() => {
                   setQuery("");
                   setResults([]);
+                  setBrowseRecords([]);
+                  setBrowseTotal(0);
+                  setMode("search");
                   setSelectedLabels(new Set());
                   setError(null);
                   setSelectedPhoto(null);
@@ -271,6 +371,21 @@ export default function App() {
             </div>
             {error && <div className="error">{error}</div>}
           </form>
+          <div className="panel-head">
+            <h4>Maintenance</h4>
+          </div>
+          <div className="stack">
+            <div className="row">
+              <button type="button" className="secondary" onClick={() => runReindex("pending")}>
+                Reindex pending
+              </button>
+              <button type="button" className="secondary" onClick={() => runReindex("full")}>
+                Reindex all
+              </button>
+            </div>
+            {maintenanceStatus && <div className="muted small">{maintenanceStatus}</div>}
+            {maintenanceError && <div className="error">{maintenanceError}</div>}
+          </div>
           <div className="panel-head">
             <h4>Events</h4>
             <button type="button" className="secondary" onClick={fetchEvents}>
@@ -464,6 +579,24 @@ export default function App() {
                           </div>
                         );
                       })}
+                      <div className="row wrap">
+                        <label className="muted small">
+                          <input
+                            type="checkbox"
+                            checked={preserveFaces}
+                            onChange={(e) => setPreserveFaces(e.target.checked)}
+                          />{" "}
+                          Preserve face identities on reindex
+                        </label>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={reindexSelected}
+                          disabled={photoLoading}
+                        >
+                          Reindex photo
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -472,12 +605,13 @@ export default function App() {
             </div>
           )}
           <div className="cards">
-            {loading && <div className="empty">Loading…</div>}
-            {!loading && results.length === 0 && (
+            {(loading || browseLoading) && <div className="empty">Loading…</div>}
+            {!loading && !browseLoading && cards.length === 0 && (
               <div className="empty">No results yet. Try “family” or “birthday”.</div>
             )}
             {!loading &&
-              results
+              !browseLoading &&
+              cards
                 .filter((item) => {
                   if (!selectedLabels.size) return true;
                   const labels = item.record.classifications.map((c) => c.label);
@@ -497,7 +631,9 @@ export default function App() {
                     <div key={item.record.file.id} className="card">
                       <div className="flex-between">
                         <strong className="truncate">{path}</strong>
-                        <span className="pill small">Score {formatScore(item.score)}</span>
+                        {item.score != null && (
+                          <span className="pill small">Score {formatScore(item.score)}</span>
+                        )}
                       </div>
                       <div className="thumb">
                         <img src={thumb} alt={path} />
@@ -516,7 +652,7 @@ export default function App() {
                       <button
                         type="button"
                         className="secondary"
-                        onClick={() => openPhoto(item.record, item.score)}
+                        onClick={() => openPhoto(item.record, item.score ?? undefined)}
                       >
                         Faces & context
                       </button>
@@ -524,6 +660,29 @@ export default function App() {
                   );
                 })}
           </div>
+          {mode === "browse" && browseTotal > PAGE_SIZE && (
+            <div className="row space pager">
+              <button
+                type="button"
+                className="secondary"
+                disabled={browsePage === 0 || browseLoading}
+                onClick={() => browse(Math.max(0, browsePage - 1))}
+              >
+                Previous
+              </button>
+              <div className="muted small">
+                Page {browsePage + 1} / {Math.ceil(browseTotal / PAGE_SIZE)} ({browseTotal} photos)
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                disabled={(browsePage + 1) * PAGE_SIZE >= browseTotal || browseLoading}
+                onClick={() => browse(browsePage + 1)}
+              >
+                Next
+              </button>
+            </div>
+          )}
         </section>
       </main>
     </div>

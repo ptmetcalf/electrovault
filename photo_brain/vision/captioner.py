@@ -27,6 +27,15 @@ def _normalize_conf(value: object) -> Optional[float]:
     return round(min(conf, 0.99), 2)
 
 
+def _normalize_description_text(text: str) -> str:
+    """Tighten description formatting for storage."""
+    cleaned = " ".join(text.replace("\n", " ").split())
+    cleaned = cleaned.strip(' "')
+    if cleaned and cleaned[-1] not in {".", "!", "?"}:
+        cleaned += "."
+    return cleaned
+
+
 _VECTOR_CAPTION_PROMPT = """
 You are a vision captioning engine for a photo search system.
 
@@ -94,7 +103,7 @@ def describe_photo(
         raw = None
 
     if structured and isinstance(structured, dict):
-        text = str(structured.get("description") or "").strip()
+        text = _normalize_description_text(str(structured.get("description") or ""))
         confidence = _normalize_conf(structured.get("confidence"))
         if text:
             logger.debug(
@@ -127,7 +136,7 @@ def describe_photo(
 
     return VisionDescription(
         photo_id=photo.id,
-        description=text,
+        description=_normalize_description_text(text),
         model=model_name,
         confidence=confidence,
     )

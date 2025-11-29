@@ -25,6 +25,16 @@ Run tests with pytest from the repo root:
 
 If you previously installed before the dev extra was added, clear the old editable install first: `pip uninstall -y photo-brain && pip install -e ".[dev]"`.
 
+### Common dev commands (Makefile)
+
+- `make install` — create `.venv`, install Python deps, install frontend deps.
+- `make lint` — ruff on Python, eslint on frontend.
+- `make format` — black + ruff --fix on Python.
+- `make test` / `make test-cov` — run pytest (optionally with coverage).
+- `make api` — start the FastAPI server (`uvicorn photo_brain.api.http_api:app`).
+- `make frontend-dev` / `make frontend-build` — run Vite dev server or build frontend.
+- `make ingest-sample` — ingest the `phototest/` sample set into the current DB.
+
 ## Running the API
 
 - Default to SQLite by omitting `DATABASE_URL`, or point at Postgres/pgvector:  

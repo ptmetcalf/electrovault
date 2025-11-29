@@ -28,13 +28,13 @@ def test_captioner_uses_structured(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("OLLAMA_VISION_MODEL", "mock-vision")
 
     def fake_generate(prompt: str, path: Path, schema: dict | None = None) -> Tuple[Any, Any]:
-        return {"description": "a scene", "confidence": 0.7}, {"description": "a scene"}
+        return {"description": "a scene  ", "confidence": 0.7}, {"description": "a scene"}
 
     monkeypatch.setattr(captioner, "generate_vision_structured", fake_generate)
     photo = _photo(tmp_path)
     desc = captioner.describe_photo(photo, context="ctx")
     assert desc is not None
-    assert desc.description == "a scene"
+    assert desc.description == "a scene."
     assert desc.model == "mock-vision"
     assert desc.confidence == 0.7
 
@@ -44,11 +44,13 @@ def test_captioner_falls_back_to_raw(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         captioner, "generate_vision_structured", lambda *args, **kwargs: (None, None)
     )
-    monkeypatch.setattr(captioner, "generate_vision", lambda *args, **kwargs: "raw text")
+    monkeypatch.setattr(
+        captioner, "generate_vision", lambda *args, **kwargs: "raw text with whitespace "
+    )
     photo = _photo(tmp_path)
     desc = captioner.describe_photo(photo, context=None)
     assert desc is not None
-    assert desc.description == "raw text"
+    assert desc.description == "raw text with whitespace."
 
 
 def test_classifier_parses_labels(monkeypatch, tmp_path: Path) -> None:
