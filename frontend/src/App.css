@@ -107,6 +107,15 @@ textarea {
   transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
+select {
+  width: 100%;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
 input[type="text"]:focus,
 textarea:focus {
   outline: none;

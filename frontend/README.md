@@ -31,6 +31,7 @@ The API is assumed to run on port 8000 (see `photo_brain.api.http_api`), which m
 - Maintain responsive behavior (`@media` in `App.css`): the grid collapses to a single column under 1100px; detail view stacks under 900px.
 - Accessibility: focusable elements already get focus styling; preserve `type="button"` on non-submit buttons.
 - Data wiring: this UI talks directly to the Photo Brain API (search, photos, faces, events). Keep new calls in `App.tsx` colocated with their UI section and avoid introducing new deps unless justified in `package.json`.
+- Faces view: use the merge controls to combine duplicate people via `POST /persons/merge` (select source → target); refresh happens automatically.
 
 ## Extending the UI
 

@@ -97,6 +97,11 @@ export default function App() {
   const [savingFaceId, setSavingFaceId] = useState<number | null>(null);
   const [faceError, setFaceError] = useState<string | null>(null);
   const [persons, setPersons] = useState<Person[]>([]);
+  const [mergeSourcePerson, setMergeSourcePerson] = useState("");
+  const [mergeTargetPerson, setMergeTargetPerson] = useState("");
+  const [mergeStatus, setMergeStatus] = useState<string | null>(null);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+  const [merging, setMerging] = useState(false);
 
   const cards = useMemo(() => {
     if (mode === "browse") {
@@ -128,6 +133,15 @@ export default function App() {
     ? `${API_BASE}/photos/${selectedPhoto.file.id}/image`
     : null;
   const selectedThumbImage = selectedPhoto ? `${API_BASE}/thumb/${selectedPhoto.file.id}` : null;
+
+  const personOptions = useMemo(
+    () =>
+      persons.map((p) => ({
+        id: p.id,
+        label: p.display_name || p.id,
+      })),
+    [persons]
+  );
 
   function updateResultRecord(next: PhotoRecord) {
     setResults((prev) =>
@@ -389,6 +403,46 @@ export default function App() {
       setFaceError("Loading faces failed");
     } finally {
       setFaceLoading(false);
+    }
+  }
+
+  async function mergePersonsRequest(sourceId: string, targetId: string) {
+    const res = await fetch(`${API_BASE}/persons/merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: sourceId, target_id: targetId }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  async function handleMergePersons() {
+    if (!mergeSourcePerson || !mergeTargetPerson) {
+      setMergeError("Select both source and target people");
+      return;
+    }
+    if (mergeSourcePerson === mergeTargetPerson) {
+      setMergeError("Source and target must be different");
+      return;
+    }
+    setMerging(true);
+    setMergeError(null);
+    setMergeStatus(null);
+    try {
+      const data = await mergePersonsRequest(mergeSourcePerson, mergeTargetPerson);
+      setMergeStatus(`Merged into ${data.person?.display_name || data.person?.id || "target"}`);
+      setMergeSourcePerson("");
+      setMergeTargetPerson("");
+      await loadPersons();
+      await loadFaces(facePage);
+      if (selectedPhoto) {
+        await openPhoto(selectedPhoto, selectedScore ?? undefined);
+      }
+    } catch (err) {
+      console.error(err);
+      setMergeError("Merging people failed");
+    } finally {
+      setMerging(false);
     }
   }
 
@@ -802,6 +856,46 @@ export default function App() {
                   <option key={p.id} value={p.display_name} />
                 ))}
               </datalist>
+              <div className="panel-head">
+                <h4>Merge people</h4>
+              </div>
+              <div className="stack">
+                <div className="row wrap">
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div className="muted small">Source (to merge from)</div>
+                    <select
+                      value={mergeSourcePerson}
+                      onChange={(e) => setMergeSourcePerson(e.target.value)}
+                    >
+                      <option value="">Select person</option>
+                      {personOptions.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div className="muted small">Target (keep)</div>
+                    <select
+                      value={mergeTargetPerson}
+                      onChange={(e) => setMergeTargetPerson(e.target.value)}
+                    >
+                      <option value="">Select person</option>
+                      {personOptions.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button type="button" onClick={handleMergePersons} disabled={merging}>
+                    {merging ? "Merging..." : "Merge people"}
+                  </button>
+                </div>
+                {mergeStatus && <div className="muted small">{mergeStatus}</div>}
+                {mergeError && <div className="error">{mergeError}</div>}
+              </div>
               {faceError && <div className="error">{faceError}</div>}
               <div className="faces-grid">
                 {(faceLoading || loading) && <div className="empty">Loading faces…</div>}
