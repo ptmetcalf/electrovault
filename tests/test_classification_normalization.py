@@ -42,3 +42,5 @@ def test_taxonomy_mapping() -> None:
     assert map_label(None, "portrait") == (None, "portrait")
     assert map_label("brand", "unknownbrand") is None
     assert map_label("quality", "blur-high") == ("quality", "blur-high")
+    assert map_label("bucket", "maps_navigation") == ("bucket", "maps_navigation")
+    assert map_label("bucket", "maps navigation") == ("bucket", "maps_navigation")

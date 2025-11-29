@@ -188,6 +188,28 @@ AGE_BANDS = {"child", "teen", "adult", "senior"}
 GENDERS = {"male", "female", "unknown"}
 PEOPLE_ATTR = {"glasses", "hat", "mask", "smiling", "beard"}
 QUALITY = {"blur-high", "blur-medium", "blur-low"}
+BUCKETS = {
+    "people",
+    "groups_events",
+    "selfie",
+    "pets_animals",
+    "food_recipe",
+    "documents",
+    "notes_handwriting",
+    "receipts_bills",
+    "screenshots",
+    "diagrams_charts",
+    "maps_navigation",
+    "memes_comics",
+    "art_illustration",
+    "objects_items",
+    "landscapes_outdoors",
+    "vehicles_transport",
+    "home_interiors",
+    "screens_displays",
+    "shopping_products",
+    "misc_other",
+}
 
 # Cross-category synonyms -> (category, canonical value)
 SYNONYMS: dict[str, Canonical] = {
@@ -308,6 +330,10 @@ def map_label(prefix: Optional[str], value: str) -> Optional[Canonical]:
     elif cat == "quality":
         if v in QUALITY:
             return "quality", v
+    elif cat == "bucket":
+        candidate = v.replace(" ", "_").replace("-", "_")
+        if candidate in BUCKETS:
+            return "bucket", candidate
 
     # If no prefix, allow limited unprefixed tags for compatibility.
     if cat is None:

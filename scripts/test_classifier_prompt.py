@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ if str(ROOT) not in sys.path:
 from photo_brain.core.env import load_dotenv_if_present
 from photo_brain.core.models import PhotoFile
 from photo_brain.vision.classifier import _build_classifier_prompt, classify_photo
+from photo_brain.vision import model_client
 
 
 def _hash_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -61,6 +63,11 @@ def main() -> None:
         action="store_true",
         help="Print the full prompt sent to the vision model.",
     )
+    parser.add_argument(
+        "--show-raw",
+        action="store_true",
+        help="Also call the vision model once and display raw/parsed output (debug).",
+    )
     args = parser.parse_args()
 
     load_dotenv_if_present()
@@ -81,6 +88,25 @@ def main() -> None:
         print()
 
     photo = _build_photo_model(image_path)
+
+    if args.show_raw:
+        try:
+            raw_labels, raw_output = model_client.classify_vision(prompt, image_path)
+        except model_client.LocalModelError as exc:
+            print(f"Raw model call failed: {exc}", file=sys.stderr)
+        else:
+            print("=== Raw model output ===")
+            if isinstance(raw_output, (dict, list)):
+                print(json.dumps(raw_output, indent=2))
+            else:
+                print(raw_output)
+            print()
+            print("=== Parsed tags from raw call ===")
+            for label, conf in raw_labels:
+                conf_text = f"{conf:.2f}" if conf is not None else "n/a"
+                print(f"- {label} ({conf_text})")
+            print()
+
     classifications = classify_photo(photo, context=args.context)
     if classifications is None or len(classifications) == 0:
         sys.exit(

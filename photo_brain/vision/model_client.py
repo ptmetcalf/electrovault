@@ -7,11 +7,24 @@ import re
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from photo_brain.vision.taxonomy import map_label
+from photo_brain.vision.taxonomy import BUCKETS, map_label
+
+BUCKET_ENUM = Literal[*tuple(sorted(BUCKETS))]
+_BLOCKED_OBJECTS = {
+    "person",
+    "adult",
+    "child",
+    "baby",
+    "pet",
+    "dog",
+    "cat",
+    "bird",
+}
+_BLOCKED_CATEGORIES = {"people-count", "people-attr", "age-band", "gender", "pets-count"}
 
 
 class LocalModelError(RuntimeError):
@@ -86,7 +99,8 @@ def _call_vision_api(
     if temp is not None:
         payload["temperature"] = temp
     if schema:
-        payload["format"] = {"type": "json", "schema": schema}
+        # Follow Ollama structured output docs: send the JSON schema directly.
+        payload["format"] = schema
 
     response = _post_json(f"{_base_url().rstrip('/')}/api/generate", payload, timeout=timeout)
     content = response.get("response") or response.get("content")
@@ -185,6 +199,21 @@ def _normalize_conf(value: Any) -> Optional[float]:
     return round(conf, 2)
 
 
+def _summarize_for_log(content: Any, *, limit: int = 800) -> str:
+    if content is None:
+        return "None"
+    if isinstance(content, _LLMResponse):
+        content = content.model_dump()
+    try:
+        text = json.dumps(content, default=str)
+    except Exception:
+        text = str(content)
+    text = text.strip()
+    if len(text) > limit:
+        return text[:limit] + "...<truncated>"
+    return text
+
+
 class _LLMTag(BaseModel):
     label: str
     confidence: Optional[float] = None
@@ -220,6 +249,8 @@ class _LLMResponse(BaseModel):
     people: Dict[str, Any] = Field(default_factory=dict)
     counts: Dict[str, Any] = Field(default_factory=dict)
     quality: Dict[str, Any] = Field(default_factory=dict)
+    bucket: Optional[BUCKET_ENUM] = None
+    bucket_confidence: Optional[float] = None
 
     @field_validator(
         "scene",
@@ -264,18 +295,38 @@ class _LLMResponse(BaseModel):
             return None
         return _normalize_label(v)
 
+    @field_validator("bucket", mode="before")
+    @classmethod
+    def _norm_bucket(cls, v: Any) -> Optional[str]:
+        if not isinstance(v, str):
+            return None
+        normalized = _normalize_label(v)
+        if not normalized:
+            return None
+        mapped = map_label("bucket", normalized)
+        if mapped:
+            return mapped[1]
+        return None
+
+    @field_validator("bucket_confidence", mode="before")
+    @classmethod
+    def _norm_bucket_conf(cls, v: Any) -> Optional[float]:
+        return _normalize_conf(v)
+
 
 def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Optional[float]]], Any]:
     """Call the vision model, require schema-conformant JSON, and return normalized labels + OCR."""
     schema = _LLMResponse.model_json_schema()
     parsed: Any = None
     raw_content: Any = None
+    used_schema = True
     try:
         parsed, raw_content = generate_vision_structured(prompt, image_path, schema=schema)
     except LocalModelError:
         # Fallback to non-structured output and best-effort parsing.
         raw_content = generate_vision(prompt, image_path)
         text = str(raw_content)
+        used_schema = False
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
@@ -296,19 +347,27 @@ def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Opti
     results: List[Tuple[str, Optional[float]]] = []
     seen: set[str] = set()
     max_labels = 20
+    bucket_added = False
 
     def _add_label(cat: Optional[str], val: str, conf: Any = None) -> None:
+        nonlocal bucket_added
         if len(results) >= max_labels:
             return
         mapped = map_label(cat, val)
         if not mapped:
             return
         m_cat, m_val = mapped
+        if m_cat == "object" and m_val in _BLOCKED_OBJECTS:
+            return
+        if m_cat in _BLOCKED_CATEGORIES:
+            return
         key = f"{m_cat}:{m_val}" if m_cat else m_val
         if key in seen:
             return
         seen.add(key)
         results.append((key, _normalize_conf(conf)))
+        if m_cat == "bucket":
+            bucket_added = True
 
     if validated:
         for tag in validated.labels:
@@ -331,6 +390,8 @@ def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Opti
             _add_label("time", validated.time_of_day, 0.7)
         if validated.weather:
             _add_label("weather", validated.weather, 0.7)
+        if validated.bucket:
+            _add_label("bucket", validated.bucket, validated.bucket_confidence or 0.95)
 
         people = validated.people or {}
         count = people.get("count")
@@ -384,8 +445,17 @@ def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Opti
             else:
                 _add_label(None, tok, None)
 
+    if not bucket_added:
+        # Ensure a bucket is always present; fallback to misc_other with neutral confidence.
+        max_labels = max_labels + 1  # allow room for bucket without dropping tags
+        _add_label("bucket", "misc_other", 0.5)
+
     if not results:
-        raise LocalModelError("No usable labels from vision model")
+        parsed_summary = _summarize_for_log(validated or parsed)
+        raw_summary = _summarize_for_log(raw_content)
+        raise LocalModelError(
+            f"No usable labels from vision model (used_schema={used_schema}, parsed={parsed_summary}, raw={raw_summary})"
+        )
 
     return results, raw_content
 

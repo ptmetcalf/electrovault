@@ -20,9 +20,33 @@ _CLASSIFIER_PROMPT = """
 You are an image tagger for a photo search system. Return structured JSON only.
 
 Goal:
-Produce 12–20 short, low-level visual tags covering objects, attributes,
+Produce 12-20 short, low-level visual tags covering objects, attributes,
 environment, activities, events, colors, brands/logos, time/weather, quality,
-and any visible text. Prefer more specific tags when visible.
+and any visible text. Prefer more specific tags when visible. Do not tag
+people or pets/faces; leave any people/pet fields empty/null because face
+detection handles them separately. Also select a
+single high-level bucket for the entire image (best match only) from EXACTLY one of:
+- people
+- groups_events
+- selfie
+- pets_animals
+- food_recipe
+- documents
+- notes_handwriting
+- receipts_bills
+- screenshots
+- diagrams_charts
+- maps_navigation
+- memes_comics
+- art_illustration
+- objects_items
+- landscapes_outdoors
+- vehicles_transport
+- home_interiors
+- screens_displays
+- shopping_products
+- misc_other
+If unsure, choose misc_other (never leave bucket null).
 
 Rules:
 - Use lowercase, 1–3 word tokens; no sentences or speculation.
@@ -42,14 +66,11 @@ Required JSON shape:
   "time_of_day": "morning" | "afternoon" | "evening" | "night" | null,
   "weather": "sunny" | "cloudy" | "rainy" | "snowy" | "foggy" | null,
   "ocr_text": [ "visible sign text" ],
-  "people": {
-    "count": 0,
-    "attributes": [ "adult", "smiling" ],
-    "age_bands": [ "adult" ],
-    "genders": [ "male" ]
-  },
-  "counts": { "pets": 0 },
-  "quality": { "blur": 0.1, "lighting": "natural", "composition": [ "rule-of-thirds" ] }
+  "people": null,
+  "counts": {},
+  "quality": { "blur": 0.1, "lighting": "natural", "composition": [ "rule-of-thirds" ] },
+  "bucket": "people",
+  "bucket_confidence": 0.94
 }
 """.strip()
 
