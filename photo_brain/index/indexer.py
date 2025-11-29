@@ -36,7 +36,7 @@ from .updates import set_detection_person, upsert_person
 from .vector_backend import PgVectorBackend
 
 logger = logging.getLogger(__name__)
-FACE_MATCH_THRESHOLD = float(os.getenv("FACE_MATCH_THRESHOLD", "0.82"))
+FACE_MATCH_THRESHOLD = float(os.getenv("FACE_MATCH_THRESHOLD", "0.75"))
 
 
 def _build_photo_model(row: PhotoFileRow) -> PhotoFile:
@@ -254,7 +254,10 @@ def index_photo(
     detection_rows = session.scalars(
         select(FaceDetectionRow).where(FaceDetectionRow.photo_id == photo_row.id)
     ).all()
-    if detection_rows and preserve_faces:
+    stale_detections = any(
+        (row.encoding is None) or (len(row.encoding) < 128) for row in detection_rows
+    )
+    if detection_rows and preserve_faces and not stale_detections:
         logger.info(
             "Index: reusing %d existing face detections for photo %s",
             len(detection_rows),
@@ -272,6 +275,12 @@ def index_photo(
                 )
             )
     else:
+        if detection_rows:
+            logger.info(
+                "Index: refreshing %d face detections for photo %s (missing/low-dim encodings)",
+                len(detection_rows),
+                photo_row.id,
+            )
         session.execute(delete(FaceDetectionRow).where(FaceDetectionRow.photo_id == photo_row.id))
         logger.info("Index: detecting faces for photo %s", photo_row.id)
         detections = detect_faces(photo_model)

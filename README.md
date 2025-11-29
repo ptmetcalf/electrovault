@@ -46,7 +46,7 @@ If you previously installed before the dev extra was added, clear the old editab
   - Thumbnails: `GET /thumb/{photo_id}` returns a JPEG thumbnail (max size controlled by `THUMB_MAX_SIZE`, default 320).
   - Full-size: `GET /photos/{photo_id}/image` streams the original photo bytes.
   - Faces: `GET /faces` lists detections (filter with `?unassigned=1` or `?person=alice`); `GET /faces/{detection_id}/crop` returns a cropped face JPEG for labeling. `GET /persons` lists known people; `POST /persons/{person_id}/rename` updates a display name; `POST /persons/merge` moves detections to a single person.
-  - Face matching: set `FACE_MATCH_THRESHOLD` (default `0.82`) to tune auto-matching of new detections to existing people based on stored encodings.
+  - Face matching: set `FACE_MATCH_THRESHOLD` (default `0.75`) to tune auto-matching of new detections to existing people based on stored encodings.
 
 ## Using Local Vision + Embedding Models (Ollama/LM Studio)
 

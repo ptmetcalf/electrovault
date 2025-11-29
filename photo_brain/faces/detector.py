@@ -66,15 +66,21 @@ def _load_net() -> cv2.dnn_Net:
 
 
 def _encode_crop(img: np.ndarray, bbox: Tuple[int, int, int, int]) -> list[float]:
-    """Create a small, deterministic embedding from the face crop."""
+    """Create a simple, normalized embedding from the face crop for similarity matching."""
     x1, y1, x2, y2 = bbox
     x1, y1 = max(x1, 0), max(y1, 0)
     crop = img[y1:y2, x1:x2]
     if crop.size == 0:
         return []
-    resized = cv2.resize(crop, (32, 32), interpolation=cv2.INTER_LINEAR)
-    digest = hashlib.sha256(resized.tobytes()).digest()
-    return [(byte / 255.0) * 2 - 1 for byte in digest[:32]]
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+    resized = cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA)
+    normalized = resized.astype(np.float32)
+    normalized -= float(np.mean(normalized))
+    norm = float(np.linalg.norm(normalized))
+    if norm == 0:
+        return []
+    embedding = (normalized / norm).flatten()
+    return embedding.tolist()
 
 
 def _to_bbox(det: np.ndarray, width: int, height: int) -> Tuple[int, int, int, int]:
