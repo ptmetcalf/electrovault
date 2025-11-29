@@ -8,6 +8,7 @@ dependencies = [
     "sqlalchemy>=2.0,<3",
     "fastapi>=0.110,<1",
     "pillow>=10,<11",
+    "opencv-python-headless>=4.10,<5",
     "psycopg[binary]>=3.1,<4",
     "uvicorn>=0.23,<1",
     "python-dotenv>=1.0,<2",
@@ -16,8 +17,24 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4,<9",
+    "ruff>=0.6.9,<0.7",
+    "black>=24.10,<25",
 ]
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["photo_brain"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]

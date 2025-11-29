@@ -61,6 +61,7 @@ export default function App() {
   const [faceEdits, setFaceEdits] = useState<Record<number, string>>({});
   const [contextDraft, setContextDraft] = useState("");
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [hoverDetectionId, setHoverDetectionId] = useState<number | null>(null);
 
   const labelBadges = useMemo(() => {
     return results.flatMap((r) => r.record.classifications.map((c) => c.label));
@@ -379,7 +380,7 @@ export default function App() {
                         return (
                           <div
                             key={det.id}
-                            className="face-box"
+                            className={`face-box ${hoverDetectionId === det.id ? "active" : ""}`}
                             style={{
                               left: `${left}%`,
                               top: `${top}%`,
@@ -430,7 +431,12 @@ export default function App() {
                         const face = det.id ? facesByDetection.get(det.id) : undefined;
                         const value = det.id ? faceEdits[det.id] ?? face?.person_id ?? face?.label ?? "" : "";
                         return (
-                          <div key={det.id || `${det.bbox[0]}-${det.bbox[1]}`} className="face-row">
+                          <div
+                            key={det.id || `${det.bbox[0]}-${det.bbox[1]}`}
+                            className="face-row"
+                            onMouseEnter={() => det.id && setHoverDetectionId(det.id)}
+                            onMouseLeave={() => setHoverDetectionId(null)}
+                          >
                             <div className="muted">ID {det.id ?? "?"}</div>
                             <input
                               type="text"
@@ -440,6 +446,8 @@ export default function App() {
                                 setFaceEdits((prev) => ({ ...prev, [det.id!]: e.target.value }));
                               }}
                               placeholder="Name this face"
+                              onFocus={() => det.id && setHoverDetectionId(det.id)}
+                              onBlur={() => setHoverDetectionId(null)}
                             />
                             {det.id && (
                               <button
@@ -447,6 +455,8 @@ export default function App() {
                                 className="secondary"
                                 onClick={() => saveFaceLabel(det.id!)}
                                 disabled={photoLoading}
+                                onMouseEnter={() => setHoverDetectionId(det.id!)}
+                                onMouseLeave={() => setHoverDetectionId(null)}
                               >
                                 Save name
                               </button>

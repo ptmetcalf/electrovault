@@ -29,7 +29,6 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 
-
 convention = {
     "ix": "ix_%(column_0_label)s",
     "uq": "uq_%(table_name)s_%(column_0_name)s",
@@ -81,9 +80,7 @@ class ExifDataRow(Base):
     photo_id: Mapped[str] = mapped_column(
         ForeignKey("photo_files.id", ondelete="CASCADE"), primary_key=True
     )
-    datetime_original: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True)
-    )
+    datetime_original: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     gps_lat: Mapped[Optional[float]] = mapped_column(Float)
     gps_lon: Mapped[Optional[float]] = mapped_column(Float)
     gps_altitude: Mapped[Optional[float]] = mapped_column(Float)
@@ -241,7 +238,9 @@ def create_engine_from_url(database_url: str) -> Engine:
 
 
 def init_db(database_url: str | Engine) -> Engine:
-    engine = database_url if isinstance(database_url, Engine) else create_engine_from_url(database_url)
+    engine = (
+        database_url if isinstance(database_url, Engine) else create_engine_from_url(database_url)
+    )
 
     if engine.dialect.name == "postgresql":
         with engine.connect() as conn:

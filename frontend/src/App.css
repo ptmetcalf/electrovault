@@ -270,6 +270,7 @@ button:hover {
   border: 2px solid var(--accent);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
   border-radius: 8px;
+  transition: box-shadow 120ms ease, border-color 120ms ease;
 }
 
 .face-label {
@@ -282,6 +283,11 @@ button:hover {
   font-size: 11px;
   font-weight: 700;
   border-radius: 8px;
+}
+
+.face-box.active {
+  border-color: #34d399;
+  box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.25);
 }
 
 .detail-meta {

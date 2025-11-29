@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import numbers
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-import numbers
 
 from PIL import Image
 

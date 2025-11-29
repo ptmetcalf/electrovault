@@ -57,9 +57,7 @@ def execute_search(
         photo_row = session.get(PhotoFileRow, match.photo_id)
         if photo_row is None:
             continue
-        record = build_photo_record(
-            session, photo_row, embedding_model=query_embedding.model
-        )
+        record = build_photo_record(session, photo_row, embedding_model=query_embedding.model)
         if not _within_date_window(record, query):
             continue
         if not _matches_people(record, query.people):
@@ -73,5 +71,7 @@ def execute_search(
             matched_filters.append("people")
         if query.event_ids:
             matched_filters.append("event")
-        results.append(SearchResult(record=record, score=match.score, matched_filters=matched_filters))
+        results.append(
+            SearchResult(record=record, score=match.score, matched_filters=matched_filters)
+        )
     return results

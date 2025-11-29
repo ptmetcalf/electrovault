@@ -14,9 +14,7 @@ def group_events(session: Session, gap_hours: int = 12) -> List[MemoryEventRow]:
     session.execute(delete(event_photos))
     session.execute(delete(MemoryEventRow))
 
-    photos = session.scalars(
-        select(PhotoFileRow).order_by(PhotoFileRow.mtime.asc())
-    ).all()
+    photos = session.scalars(select(PhotoFileRow).order_by(PhotoFileRow.mtime.asc())).all()
     if not photos:
         session.commit()
         return []

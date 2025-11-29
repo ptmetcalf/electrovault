@@ -3,7 +3,12 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from photo_brain.index.schema import FaceDetectionRow, FaceIdentityRow, PhotoFileRow, VisionDescriptionRow
+from photo_brain.index.schema import (
+    FaceDetectionRow,
+    FaceIdentityRow,
+    PhotoFileRow,
+    VisionDescriptionRow,
+)
 
 
 def assign_face_identity(session: Session, detection_id: int, person_label: str) -> FaceIdentityRow:
@@ -24,7 +29,9 @@ def assign_face_identity(session: Session, detection_id: int, person_label: str)
     return identity
 
 
-def set_photo_user_context(session: Session, photo_row: PhotoFileRow, context: str) -> VisionDescriptionRow:
+def set_photo_user_context(
+    session: Session, photo_row: PhotoFileRow, context: str
+) -> VisionDescriptionRow:
     """Persist user-provided context for a photo."""
     vision = session.get(VisionDescriptionRow, photo_row.id)
     if vision:

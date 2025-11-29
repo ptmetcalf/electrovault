@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import List, Optional
 
 from photo_brain.core.models import Classification, ExifData, PhotoFile
 from photo_brain.vision.model_client import LocalModelError, classify_vision
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,12 @@ Required JSON shape:
   "time_of_day": "morning" | "afternoon" | "evening" | "night" | null,
   "weather": "sunny" | "cloudy" | "rainy" | "snowy" | "foggy" | null,
   "ocr_text": [ "visible sign text" ],
-  "people": { "count": 0, "attributes": [ "adult", "smiling" ], "age_bands": [ "adult" ], "genders": [ "male" ] },
+  "people": {
+    "count": 0,
+    "attributes": [ "adult", "smiling" ],
+    "age_bands": [ "adult" ],
+    "genders": [ "male" ]
+  },
   "counts": { "pets": 0 },
   "quality": { "blur": 0.1, "lighting": "natural", "composition": [ "rule-of-thirds" ] }
 }
@@ -80,14 +84,10 @@ def classify_photo(
     try:
         tag_results, raw = classify_vision(prompt, Path(photo.path))
     except LocalModelError as exc:
-        logger.warning(
-            "Vision classifier failed for %s: %s", photo.path, exc
-        )
+        logger.warning("Vision classifier failed for %s: %s", photo.path, exc)
         return None
     except Exception as exc:
-        logger.error(
-            "Vision classifier runtime error for %s: %s", photo.path, exc
-        )
+        logger.error("Vision classifier runtime error for %s: %s", photo.path, exc)
         return None
 
     logger.debug(

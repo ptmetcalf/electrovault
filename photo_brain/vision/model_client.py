@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
+
 from photo_brain.vision.taxonomy import map_label
 
 
@@ -118,13 +119,7 @@ def generate_vision_structured(
 
 def _normalize_label(label: str) -> Optional[str]:
     """Normalize labels to short, lower-case tokens; drop sentence-like or noisy entries."""
-    raw = (
-        label.strip()
-        .strip("`")
-        .strip("{}[]\"'")
-        .replace("\n", " ")
-        .strip()
-    )
+    raw = label.strip().strip("`").strip("{}[]\"'").replace("\n", " ").strip()
     if not raw:
         return None
 
@@ -146,7 +141,17 @@ def _normalize_label(label: str) -> Optional[str]:
     if not value:
         return None
     # Reject tokens that are essentially numbers or boilerplate.
-    if value in {"confidence", "label", "labels", "json", "object", "objects", "probability", "score", "example"}:
+    if value in {
+        "confidence",
+        "label",
+        "labels",
+        "json",
+        "object",
+        "objects",
+        "probability",
+        "score",
+        "example",
+    }:
         return None
     if re.fullmatch(r"\d+(\.\d+)?", value):
         return None
@@ -289,7 +294,6 @@ def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Opti
             validated = None
 
     results: List[Tuple[str, Optional[float]]] = []
-    ocr_texts: List[str] = validated.ocr_text if validated else []
     seen: set[str] = set()
     max_labels = 20
 

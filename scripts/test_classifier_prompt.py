@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# ruff: noqa: E402
 """
 Test the classifier prompt against a single image using the local vision model.
 
@@ -83,7 +84,8 @@ def main() -> None:
     classifications = classify_photo(photo, context=args.context)
     if classifications is None or len(classifications) == 0:
         sys.exit(
-            "No classifications returned. Ensure the local vision model is running and produces parseable output."
+            "No classifications returned. Ensure the local vision model is running and "
+            "produces parseable output."
         )
 
     print(f"Image: {photo.path}")

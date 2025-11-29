@@ -7,7 +7,6 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from photo_brain.core.models import (
-    Classification,
     ExifData,
     FaceDetection,
     FaceIdentity,
@@ -64,9 +63,7 @@ def _load_exif_model(row: Optional[ExifDataRow]) -> Optional[ExifData]:
     )
 
 
-def _merge_prompt_context(
-    user_context: str | None, faces: list[FaceIdentity]
-) -> str | None:
+def _merge_prompt_context(user_context: str | None, faces: list[FaceIdentity]) -> str | None:
     """Combine user context with known face assignments for richer prompts."""
     context_parts: list[str] = []
     names = sorted(
@@ -99,7 +96,11 @@ def index_photo(
     photo_model = _build_photo_model(photo_row)
 
     existing_vision = session.get(VisionDescriptionRow, photo_row.id)
-    applied_context = context if context is not None else (existing_vision.user_context if existing_vision else None)
+    applied_context = (
+        context
+        if context is not None
+        else (existing_vision.user_context if existing_vision else None)
+    )
     if skip_if_fresh and existing_vision and existing_vision.user_context == applied_context:
         class_count = session.scalar(
             select(func.count())
@@ -146,13 +147,9 @@ def index_photo(
         logger.info("Index: skipping vision upsert for %s (no model output)", photo_row.id)
 
     logger.info("Index: classifying photo %s", photo_row.id)
-    classifications = classify_photo(
-        photo_model, exif_model, context=prompt_context
-    )
+    classifications = classify_photo(photo_model, exif_model, context=prompt_context)
     if classifications is not None:
-        session.execute(
-            delete(ClassificationRow).where(ClassificationRow.photo_id == photo_row.id)
-        )
+        session.execute(delete(ClassificationRow).where(ClassificationRow.photo_id == photo_row.id))
         for classification in classifications:
             session.add(
                 ClassificationRow(
@@ -187,9 +184,7 @@ def index_photo(
                 )
             )
     else:
-        session.execute(
-            delete(FaceDetectionRow).where(FaceDetectionRow.photo_id == photo_row.id)
-        )
+        session.execute(delete(FaceDetectionRow).where(FaceDetectionRow.photo_id == photo_row.id))
         logger.info("Index: detecting faces for photo %s", photo_row.id)
         detections = detect_faces(photo_model)
         identities = recognize_faces(detections)

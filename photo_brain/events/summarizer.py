@@ -15,9 +15,7 @@ from photo_brain.index import (
 
 
 def summarize_events(session: Session) -> List[MemoryEvent]:
-    events = session.scalars(
-        select(MemoryEventRow).order_by(MemoryEventRow.start_time.asc())
-    ).all()
+    events = session.scalars(select(MemoryEventRow).order_by(MemoryEventRow.start_time.asc())).all()
     summaries: List[MemoryEvent] = []
     for event in events:
         photo_ids = [photo.id for photo in event.photos]

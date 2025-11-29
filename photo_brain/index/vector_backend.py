@@ -26,9 +26,7 @@ def _cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
 class PgVectorBackend:
     """Vector backend backed by the text_embeddings table (pgvector friendly)."""
 
-    def upsert_embedding(
-        self, session: Session, embedding: TextEmbedding
-    ) -> TextEmbeddingRow:
+    def upsert_embedding(self, session: Session, embedding: TextEmbedding) -> TextEmbeddingRow:
         vector = list(embedding.vector)
         dim = len(vector)
         existing = session.scalar(

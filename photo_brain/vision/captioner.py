@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
+import re
 from pathlib import Path
 from typing import Optional, Tuple
 
 from photo_brain.core.models import ExifData, PhotoFile, VisionDescription
-from photo_brain.vision.model_client import LocalModelError, generate_vision, generate_vision_structured
-
-import json
-import re
-import logging
+from photo_brain.vision.model_client import (
+    LocalModelError,
+    generate_vision,
+    generate_vision_structured,
+)
 
 logger = logging.getLogger(__name__)
 

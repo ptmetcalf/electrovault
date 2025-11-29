@@ -15,14 +15,14 @@ from photo_brain.index import (
     PgVectorBackend,
     PhotoFileRow,
     assign_face_identity,
-    init_db,
     index_photo,
+    init_db,
     load_photo_record,
     session_factory,
     set_photo_user_context,
 )
 from photo_brain.index.schema import FaceDetectionRow
-from photo_brain.ingest import ingest_and_index, index_existing_photos, ingest_directory
+from photo_brain.ingest import index_existing_photos, ingest_directory
 from photo_brain.search import execute_search, plan_search
 
 app = FastAPI(title="Photo Brain API")
@@ -35,7 +35,9 @@ engine = init_db(DATABASE_URL)
 SessionLocal = session_factory(engine)
 vector_backend = PgVectorBackend()
 THUMB_MAX_SIZE = int(os.getenv("THUMB_MAX_SIZE", "320"))
-THUMB_CACHE_DIR = Path(os.getenv("THUMB_CACHE_DIR", Path(__file__).resolve().parents[2] / "thumbnails"))
+THUMB_CACHE_DIR = Path(
+    os.getenv("THUMB_CACHE_DIR", Path(__file__).resolve().parents[2] / "thumbnails")
+)
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if FRONTEND_DIST.exists():

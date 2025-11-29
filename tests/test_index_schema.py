@@ -102,8 +102,6 @@ def test_init_db_and_basic_crud() -> None:
         assert fetched_embedding is not None
         assert fetched_embedding.embedding == [0.1, 0.2, 0.3]
 
-        fetched_event = session.scalar(
-            select(MemoryEventRow).where(MemoryEventRow.id == "evt1")
-        )
+        fetched_event = session.scalar(select(MemoryEventRow).where(MemoryEventRow.id == "evt1"))
         assert fetched_event is not None
         assert fetched_event.photos[0].id == "p1"

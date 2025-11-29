@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# ruff: noqa: E402
 """
 Test the captioner prompt against a single image using the local vision model.
 
@@ -47,7 +48,9 @@ def _build_photo_model(path: Path) -> PhotoFile:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Send a single image to the captioner prompt and print the returned description."
+        description=(
+            "Send a single image to the captioner prompt and print the returned " "description."
+        )
     )
     parser.add_argument("image", type=Path, help="Path to the image file to caption.")
     parser.add_argument(

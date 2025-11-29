@@ -4,6 +4,7 @@ import logging
 import os
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from photo_brain.core.models import ExifData, PhotoFile
@@ -100,7 +101,9 @@ def ingest_and_index(
 ) -> list[PhotoFileRow]:
     """Full ingest pipeline: scan, persist, and generate metadata/embeddings."""
     backend = backend or PgVectorBackend()
-    thumb_cache = Path(os.getenv("THUMB_CACHE_DIR", Path(__file__).resolve().parents[2] / "thumbnails"))
+    thumb_cache = Path(
+        os.getenv("THUMB_CACHE_DIR", Path(__file__).resolve().parents[2] / "thumbnails")
+    )
     thumb_max = int(os.getenv("THUMB_MAX_SIZE", "320"))
     rows = ingest_directory(root, session)
     for row in rows:
@@ -125,7 +128,9 @@ def index_existing_photos(
     - When only_missing=False, all rows are reprocessed with skip_if_fresh=False.
     """
     backend = backend or PgVectorBackend()
-    thumb_cache = thumb_cache or Path(os.getenv("THUMB_CACHE_DIR", Path(__file__).resolve().parents[2] / "thumbnails"))
+    thumb_cache = thumb_cache or Path(
+        os.getenv("THUMB_CACHE_DIR", Path(__file__).resolve().parents[2] / "thumbnails")
+    )
     thumb_max = thumb_max_size or int(os.getenv("THUMB_MAX_SIZE", "320"))
     rows = session.scalars(select(PhotoFileRow)).all()
     processed = 0
