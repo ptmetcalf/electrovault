@@ -446,9 +446,12 @@ export default function App() {
   return (
     <div className="page">
       <header className="header">
-        <div className="title-row">
-          <h1>Photo Brain</h1>
-          <span className="pill">Local-first</span>
+        <div className="title-column">
+          <div className="title-row">
+            <h1>Photo Brain</h1>
+            <span className="pill">Local-first</span>
+          </div>
+          <p className="subtitle">Agentic console for search, faces, and reindexing</p>
         </div>
         <div className="pill muted">API on port 8000</div>
       </header>
