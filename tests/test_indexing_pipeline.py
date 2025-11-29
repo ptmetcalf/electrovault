@@ -20,7 +20,9 @@ def _create_image(path: Path) -> None:
     img.save(path)
 
 
-def test_ingest_and_index_populates_metadata(tmp_path: Path) -> None:
+def test_ingest_and_index_populates_metadata(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("OLLAMA_VISION_MODEL", raising=False)
+    monkeypatch.delenv("OLLAMA_EMBED_MODEL", raising=False)
     photo_path = tmp_path / "portrait.jpg"
     _create_image(photo_path)
     engine = init_db("sqlite+pysqlite:///:memory:")
