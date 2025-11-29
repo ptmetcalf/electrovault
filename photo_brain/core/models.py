@@ -32,6 +32,25 @@ class ExifData(BaseModel):
     focal_length: Optional[float] = None
 
 
+class LocationLabel(BaseModel):
+    id: Optional[int] = None
+    name: str
+    latitude: float
+    longitude: float
+    radius_meters: int = 100
+    source: str = "api"  # api | cache | user
+    raw: Optional[dict] = None
+    created_at: Optional[datetime] = None
+
+
+class PhotoLocation(BaseModel):
+    photo_id: str
+    location: LocationLabel
+    method: str = "cache"
+    confidence: Optional[float] = None
+    created_at: Optional[datetime] = None
+
+
 class VisionDescription(BaseModel):
     photo_id: str
     description: str
@@ -82,6 +101,7 @@ class PhotoRecord(BaseModel):
     embedding: Optional[TextEmbedding] = None
     detections: list[FaceDetection] = Field(default_factory=list)
     faces: list[FaceIdentity] = Field(default_factory=list)
+    location: Optional[PhotoLocation] = None
     event_ids: list[str] = Field(default_factory=list)
 
 

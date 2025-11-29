@@ -62,6 +62,12 @@ Out of the box, captions/classifications/embeddings use deterministic fallbacks.
 - Copy the sample: `cp .env.example .env` and fill in values (DB + Ollama models).  
 - The API automatically loads `.env` on startup; for scripts, call `photo_brain.core.env.load_dotenv_if_present()` or run commands via `python -m dotenv run -- ...`.
 
+### Location resolution (optional)
+
+- Reverse geocode EXIF GPS coordinates via LocationIQ (OpenStreetMap data) and cache results for reuse.
+- Enable with `LOCATION_RESOLUTION_ENABLED=1` and supply `LOCATIONIQ_API_KEY`; tune cache radii with `LOCATION_USER_RADIUS_METERS` and `LOCATION_CACHE_RADIUS_METERS`.
+- User-defined locations take priority and can be created/assigned via `POST /locations` (name, latitude, longitude, radius_meters, optional photo_id).
+
 ## CLI Ingest (local folder)
 
 ```bash

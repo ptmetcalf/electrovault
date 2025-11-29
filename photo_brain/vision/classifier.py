@@ -77,9 +77,16 @@ def classify_photo(
     """
     model_name = os.getenv("OLLAMA_VISION_MODEL")
     if not model_name:
+        logger.debug(
+            "Vision classifier: OLLAMA_VISION_MODEL not set; skipping %s", photo.path
+        )
         return None  # Missing model → skip updates
 
     prompt = _build_classifier_prompt(context)
+
+    logger.debug(
+        "Vision classifier: calling model for %s (prompt %d chars)", photo.path, len(prompt)
+    )
 
     try:
         tag_results, raw = classify_vision(prompt, Path(photo.path))

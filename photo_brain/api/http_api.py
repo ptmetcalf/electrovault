@@ -16,10 +16,12 @@ from photo_brain.index import (
     PgVectorBackend,
     PhotoFileRow,
     assign_face_identity,
+    assign_user_location,
     index_photo,
     init_db,
     load_photo_record,
     session_factory,
+    upsert_user_location,
     set_photo_user_context,
 )
 from photo_brain.index.schema import FaceDetectionRow
@@ -89,6 +91,14 @@ class FaceAssignmentRequest(BaseModel):
 class ContextUpdateRequest(BaseModel):
     context: str
     reindex: bool = True
+
+
+class LocationCreateRequest(BaseModel):
+    name: str
+    latitude: float
+    longitude: float
+    radius_meters: int = 100
+    photo_id: str | None = None
 
 
 @app.post("/reindex")
@@ -168,6 +178,40 @@ def update_context(
 
     record = load_photo_record(session, photo_id)
     return {"photo": record.model_dump() if record else None}
+
+
+@app.post("/locations")
+def create_location(req: LocationCreateRequest, session: Session = Depends(get_session)) -> dict:
+    if req.radius_meters <= 0:
+        raise HTTPException(status_code=400, detail="radius_meters must be positive")
+    label_row = upsert_user_location(
+        session,
+        req.name.strip(),
+        req.latitude,
+        req.longitude,
+        radius_meters=req.radius_meters,
+    )
+    assigned_record = None
+    if req.photo_id:
+        photo_row = session.get(PhotoFileRow, req.photo_id)
+        if not photo_row:
+            raise HTTPException(status_code=404, detail="Photo not found for assignment")
+        assign_user_location(session, photo_row, label_row)
+        session.flush()
+        assigned_record = load_photo_record(session, req.photo_id)
+    session.commit()
+    payload = {
+        "id": label_row.id,
+        "name": label_row.name,
+        "latitude": label_row.latitude,
+        "longitude": label_row.longitude,
+        "radius_meters": label_row.radius_meters,
+        "source": label_row.source,
+    }
+    response: dict[str, object] = {"location": payload}
+    if assigned_record:
+        response["photo"] = assigned_record.model_dump()
+    return response
 
 
 @app.get("/thumb/{photo_id}")

@@ -72,6 +72,9 @@ class PhotoFileRow(Base):
     events: Mapped[list["MemoryEventRow"]] = relationship(
         secondary="event_photos", back_populates="photos"
     )
+    location: Mapped[Optional["PhotoLocationRow"]] = relationship(
+        back_populates="photo", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class ExifDataRow(Base):
@@ -187,6 +190,44 @@ class FaceIdentityRow(Base):
     )
 
     detection: Mapped[FaceDetectionRow] = relationship(back_populates="identities")
+
+
+class LocationLabelRow(Base):
+    __tablename__ = "location_labels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    radius_meters: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="api")
+    raw: Mapped[Optional[dict]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    photos: Mapped[list["PhotoLocationRow"]] = relationship(
+        back_populates="location", cascade="all, delete-orphan"
+    )
+
+
+class PhotoLocationRow(Base):
+    __tablename__ = "photo_locations"
+
+    photo_id: Mapped[str] = mapped_column(
+        ForeignKey("photo_files.id", ondelete="CASCADE"), primary_key=True
+    )
+    location_id: Mapped[int] = mapped_column(
+        ForeignKey("location_labels.id", ondelete="CASCADE"), nullable=False
+    )
+    method: Mapped[str] = mapped_column(String, nullable=False, default="cache")
+    confidence: Mapped[Optional[float]] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    photo: Mapped[PhotoFileRow] = relationship(back_populates="location")
+    location: Mapped[LocationLabelRow] = relationship(back_populates="photos")
 
 
 class MemoryEventRow(Base):

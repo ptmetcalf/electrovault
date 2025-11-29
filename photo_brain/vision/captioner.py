@@ -82,6 +82,9 @@ def describe_photo(
     """
     model_name = os.getenv("OLLAMA_VISION_MODEL")
     if not model_name:
+        logger.debug(
+            "Vision captioner: OLLAMA_VISION_MODEL not set; skipping %s", photo.path
+        )
         return None
 
     prompt = _build_caption_prompt(context)
@@ -96,9 +99,14 @@ def describe_photo(
         "additionalProperties": True,
     }
 
+    logger.debug(
+        "Vision captioner: calling model for %s (prompt %d chars)", photo.path, len(prompt)
+    )
+
     try:
         structured, raw = generate_vision_structured(prompt, Path(photo.path), schema=schema)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Vision captioner structured call failed for %s: %s", photo.path, exc)
         structured = None
         raw = None
 
@@ -122,7 +130,8 @@ def describe_photo(
 
     try:
         raw_text = raw if raw is not None else generate_vision(prompt, Path(photo.path))
-    except Exception:
+    except Exception as exc:
+        logger.warning("Vision captioner raw call failed for %s: %s", photo.path, exc)
         return None
 
     logger.debug(

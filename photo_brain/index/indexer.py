@@ -26,6 +26,7 @@ from .schema import (
     PhotoFileRow,
     VisionDescriptionRow,
 )
+from .location import resolve_photo_location
 from .vector_backend import PgVectorBackend
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,7 @@ def index_photo(
     backend = backend or PgVectorBackend()
     exif_model = _load_exif_model(photo_row.exif)
     photo_model = _build_photo_model(photo_row)
+    resolve_photo_location(session, photo_row, exif_model)
 
     existing_vision = session.get(VisionDescriptionRow, photo_row.id)
     applied_context = (
@@ -117,6 +119,7 @@ def index_photo(
                 mtime = mtime.replace(tzinfo=created.tzinfo)
             if mtime <= created:
                 logger.info("Index: skipping photo %s (unchanged, context matched)", photo_row.id)
+                session.commit()
                 return
 
     existing_faces: list[FaceIdentity] = list_face_identities(session, photo_row.id)

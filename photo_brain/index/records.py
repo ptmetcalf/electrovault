@@ -10,6 +10,8 @@ from photo_brain.core.models import (
     ExifData,
     FaceDetection,
     FaceIdentity,
+    LocationLabel,
+    PhotoLocation,
     PhotoFile,
     PhotoRecord,
     TextEmbedding,
@@ -21,7 +23,9 @@ from .schema import (
     ExifDataRow,
     FaceDetectionRow,
     FaceIdentityRow,
+    LocationLabelRow,
     PhotoFileRow,
+    PhotoLocationRow,
     TextEmbeddingRow,
     VisionDescriptionRow,
     event_photos,
@@ -35,6 +39,29 @@ def _load_exif(row: ExifDataRow | None) -> ExifData | None:
         datetime_original=row.datetime_original,
         gps_lat=row.gps_lat,
         gps_lon=row.gps_lon,
+    )
+
+
+def _load_location(row: PhotoLocationRow | None) -> PhotoLocation | None:
+    if row is None or row.location is None:
+        return None
+    label_row: LocationLabelRow = row.location
+    label = LocationLabel(
+        id=label_row.id,
+        name=label_row.name,
+        latitude=label_row.latitude,
+        longitude=label_row.longitude,
+        radius_meters=label_row.radius_meters,
+        source=label_row.source,
+        raw=label_row.raw,
+        created_at=label_row.created_at,
+    )
+    return PhotoLocation(
+        photo_id=row.photo_id,
+        location=label,
+        method=row.method,
+        confidence=row.confidence,
+        created_at=row.created_at,
     )
 
 
@@ -79,6 +106,8 @@ def build_photo_record(
     session: Session, photo_row: PhotoFileRow, *, embedding_model: str | None = None
 ) -> PhotoRecord:
     exif = _load_exif(photo_row.exif)
+    location_row = session.get(PhotoLocationRow, photo_row.id)
+    location = _load_location(location_row)
 
     vision_row = session.scalar(
         select(VisionDescriptionRow).where(VisionDescriptionRow.photo_id == photo_row.id)
@@ -155,6 +184,7 @@ def build_photo_record(
         embedding=embedding,
         detections=detections,
         faces=faces,
+        location=location,
         event_ids=event_ids,
     )
 
