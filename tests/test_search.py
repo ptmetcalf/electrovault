@@ -92,6 +92,9 @@ def test_execute_search_filters_by_person(tmp_path) -> None:
         photo_row = session.scalar(select(PhotoFileRow))
         assert identity is not None
         assert photo_row is not None
+        # Provide a fallback embedding so search can return results when vision is unavailable.
+        backend.upsert_embedding(session, embed_description("portrait", photo_id=photo_row.id))
+        session.commit()
 
         query = plan_search(f"portrait person:{identity.person_label}")
         results = execute_search(session, backend, query)

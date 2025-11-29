@@ -48,6 +48,17 @@ def _embed_model() -> Optional[str]:
     return os.getenv("OLLAMA_EMBED_MODEL")
 
 
+def _temperature() -> Optional[float]:
+    raw = os.getenv("OLLAMA_TEMPERATURE")
+    if raw is None:
+        return 0.0
+    try:
+        val = float(raw)
+    except ValueError:
+        return 0.0
+    return max(0.0, min(val, 1.0))
+
+
 def generate_vision(prompt: str, image_path: Path) -> str:
     """Call a local vision-capable model (e.g., LLaVA on Ollama) to get a caption."""
     parsed, raw = generate_vision_structured(prompt, image_path, schema=None)
@@ -70,6 +81,9 @@ def _call_vision_api(
         "stream": False,
         "images": [_encode_image(image_path)],
     }
+    temp = _temperature()
+    if temp is not None:
+        payload["temperature"] = temp
     if schema:
         payload["format"] = {"type": "json", "schema": schema}
 

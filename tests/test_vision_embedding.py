@@ -15,12 +15,10 @@ def test_describe_photo_and_classify() -> None:
     )
     exif = ExifData(datetime_original=datetime(2023, 1, 1, tzinfo=timezone.utc))
     vision = describe_photo(photo, exif)
-    assert "cat selfie" in vision.description
-    assert "2023-01-01" in vision.description
+    assert vision is None  # No model configured should return None
 
     classes = classify_photo(photo, exif)
-    labels = {c.label for c in classes}
-    assert "portrait" in labels or "pet" in labels
+    assert classes is None
 
 
 def test_embed_description_is_deterministic() -> None:

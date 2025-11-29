@@ -122,42 +122,48 @@ def index_photo(
     prompt_context = _merge_prompt_context(applied_context, existing_faces)
 
     logger.info("Index: describing photo %s", photo_row.id)
-    vision: VisionDescription = describe_photo(
+    vision: VisionDescription | None = describe_photo(
         photo_model, exif_model, context=prompt_context
     )
     existing_vision = session.get(VisionDescriptionRow, photo_row.id)
-    if existing_vision:
-        existing_vision.description = vision.description
-        existing_vision.model = vision.model
-        existing_vision.confidence = vision.confidence
-        existing_vision.user_context = applied_context
-    else:
-        session.add(
-            VisionDescriptionRow(
-                photo_id=photo_row.id,
-                description=vision.description,
-                model=vision.model,
-                confidence=vision.confidence,
-                user_context=applied_context,
+    if vision:
+        if existing_vision:
+            existing_vision.description = vision.description
+            existing_vision.model = vision.model
+            existing_vision.confidence = vision.confidence
+            existing_vision.user_context = applied_context
+        else:
+            session.add(
+                VisionDescriptionRow(
+                    photo_id=photo_row.id,
+                    description=vision.description,
+                    model=vision.model,
+                    confidence=vision.confidence,
+                    user_context=applied_context,
+                )
             )
-        )
+    else:
+        logger.info("Index: skipping vision upsert for %s (no model output)", photo_row.id)
 
     logger.info("Index: classifying photo %s", photo_row.id)
     classifications = classify_photo(
         photo_model, exif_model, context=prompt_context
     )
-    session.execute(
-        delete(ClassificationRow).where(ClassificationRow.photo_id == photo_row.id)
-    )
-    for classification in classifications:
-        session.add(
-            ClassificationRow(
-                photo_id=photo_row.id,
-                label=classification.label,
-                score=classification.score,
-                source=classification.source,
-            )
+    if classifications is not None:
+        session.execute(
+            delete(ClassificationRow).where(ClassificationRow.photo_id == photo_row.id)
         )
+        for classification in classifications:
+            session.add(
+                ClassificationRow(
+                    photo_id=photo_row.id,
+                    label=classification.label,
+                    score=classification.score,
+                    source=classification.source,
+                )
+            )
+    else:
+        logger.info("Index: skipping classification upsert for %s (no model output)", photo_row.id)
 
     detections: list[FaceDetection] = []
     detection_rows = session.scalars(
@@ -210,15 +216,21 @@ def index_photo(
                 )
         session.flush()
 
-    logger.info("Index: embedding description for photo %s", photo_row.id)
-    embedding = embed_description(vision.description, photo_id=photo_row.id)
-    backend.upsert_embedding(session, embedding)
+    embedding = None
+    if vision:
+        logger.info("Index: embedding description for photo %s", photo_row.id)
+        embedding = embed_description(vision.description, photo_id=photo_row.id)
+        backend.upsert_embedding(session, embedding)
+    else:
+        logger.info("Index: skipping embedding for photo %s (no vision description)", photo_row.id)
     session.commit()
+    vision_model = vision.model if vision else "none"
+    embedding_model = embedding.model if embedding else "none"
     logger.info(
         "Index: completed photo %s (vision model=%s, %d classes, %d faces, embed model=%s)",
         photo_row.id,
-        vision.model,
-        len(classifications),
+        vision_model,
+        len(classifications or []),
         len(detections),
-        embedding.model,
+        embedding_model,
     )

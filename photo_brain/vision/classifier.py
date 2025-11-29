@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from photo_brain.core.models import Classification, ExifData, PhotoFile
 from photo_brain.vision.model_client import LocalModelError, classify_vision
@@ -62,7 +62,7 @@ def _build_classifier_prompt(context: str | None) -> str:
 
 def classify_photo(
     photo: PhotoFile, exif: ExifData | None = None, context: str | None = None
-) -> List[Classification]:
+) -> Optional[List[Classification]]:
     """
     Classify a photo via the local vision model.
 
@@ -73,19 +73,7 @@ def classify_photo(
     """
     model_name = os.getenv("OLLAMA_VISION_MODEL")
     if not model_name:
-        # Deterministic fallback tags when no local model is configured.
-        stem = Path(photo.path).stem.lower()
-        labels: list[str] = ["portrait"]
-        if any(token in stem for token in ("cat", "kitten", "dog", "pet")):
-            labels.extend(["pet", "animal"])
-        if context:
-            for token in context.lower().replace(",", " ").split():
-                if token and len(labels) < 6:
-                    labels.append(token)
-        return [
-            Classification(photo_id=photo.id, label=label, score=0.8, source="fallback")
-            for label in labels
-        ]
+        return None  # Missing model → skip updates
 
     prompt = _build_classifier_prompt(context)
 
@@ -95,12 +83,12 @@ def classify_photo(
         logger.warning(
             "Vision classifier failed for %s: %s", photo.path, exc
         )
-        return []
+        return None
     except Exception as exc:
         logger.error(
             "Vision classifier runtime error for %s: %s", photo.path, exc
         )
-        return []
+        return None
 
     logger.debug(
         "Vision classifier raw output\nImage: %s\nPrompt:\n%s\nOutput:\n%s",

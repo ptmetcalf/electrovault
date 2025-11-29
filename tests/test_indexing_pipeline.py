@@ -32,9 +32,10 @@ def test_ingest_and_index_populates_metadata(tmp_path: Path) -> None:
         ingest_and_index(tmp_path, session, backend=backend)
         photo = session.scalar(select(PhotoFileRow))
         assert photo is not None
+        # Vision/classifications are skipped if no model configured.
         vision = session.scalar(select(VisionDescriptionRow))
-        assert vision is not None
-        embedding = session.scalar(select(TextEmbeddingRow))
-        assert embedding is not None
         classes = session.scalars(select(ClassificationRow)).all()
-        assert classes
+        embedding = session.scalar(select(TextEmbeddingRow))
+        assert vision is None
+        assert not classes
+        assert embedding is None

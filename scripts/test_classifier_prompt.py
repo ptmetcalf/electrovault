@@ -81,7 +81,7 @@ def main() -> None:
 
     photo = _build_photo_model(image_path)
     classifications = classify_photo(photo, context=args.context)
-    if not classifications:
+    if classifications is None or len(classifications) == 0:
         sys.exit(
             "No classifications returned. Ensure the local vision model is running and produces parseable output."
         )

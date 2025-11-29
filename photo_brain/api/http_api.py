@@ -9,7 +9,7 @@ from PIL import Image
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from photo_brain.core.env import load_dotenv_if_present
+from photo_brain.core.env import configure_logging, load_dotenv_if_present
 from photo_brain.events import group_events, summarize_events
 from photo_brain.index import (
     PgVectorBackend,
@@ -22,12 +22,13 @@ from photo_brain.index import (
     set_photo_user_context,
 )
 from photo_brain.index.schema import FaceDetectionRow
-from photo_brain.ingest import ingest_and_index
+from photo_brain.ingest import ingest_and_index, index_existing_photos, ingest_directory
 from photo_brain.search import execute_search, plan_search
 
 app = FastAPI(title="Photo Brain API")
 
 load_dotenv_if_present()
+configure_logging()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+pysqlite:///./photo_brain.db")
 engine = init_db(DATABASE_URL)
@@ -191,27 +192,47 @@ def thumbnail(photo_id: str, session: Session = Depends(get_session)) -> Respons
         raise HTTPException(status_code=500, detail=f"Error generating thumbnail: {exc}") from exc
 
 
-@app.on_event("startup")
-def auto_ingest() -> None:
-    """Automatically ingest and index a directory on startup."""
-    target = os.getenv("AUTO_INGEST_DIR")
-    if target:
-        ingest_root = Path(target)
+class BulkIndexRequest(BaseModel):
+    root: str | None = None
+    context: str | None = None
+
+
+def _resolve_ingest_root(root: str | None) -> Path:
+    if root:
+        path = Path(root).expanduser()
+    elif os.getenv("AUTO_INGEST_DIR"):
+        path = Path(os.getenv("AUTO_INGEST_DIR", "")).expanduser()
     else:
-        ingest_root = Path(__file__).resolve().parents[2] / "phototest"
+        path = Path(__file__).resolve().parents[2] / "phototest"
+    if not path.exists() or not path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Ingest path not found: {path}")
+    return path
 
-    if not ingest_root.exists() or not ingest_root.is_dir():
-        # Skip if missing; keeps startup non-fatal.
-        return
 
-    force_reindex = os.getenv("AUTO_INGEST_FORCE", "0") == "1"
-    with SessionLocal() as session:
-        ingest_and_index(
-            ingest_root,
-            session,
-            context=os.getenv("AUTO_INGEST_CONTEXT"),
-            skip_if_fresh=not force_reindex,
-        )
+@app.post("/reindex/full")
+def reindex_all(req: BulkIndexRequest, session: Session = Depends(get_session)) -> dict:
+    ingest_root = _resolve_ingest_root(req.root)
+    ingest_directory(ingest_root, session)
+    count = index_existing_photos(
+        session,
+        backend=vector_backend,
+        context=req.context,
+        only_missing=False,
+    )
+    return {"processed": count}
+
+
+@app.post("/reindex/pending")
+def reindex_pending(req: BulkIndexRequest, session: Session = Depends(get_session)) -> dict:
+    ingest_root = _resolve_ingest_root(req.root)
+    ingest_directory(ingest_root, session)
+    count = index_existing_photos(
+        session,
+        backend=vector_backend,
+        context=req.context,
+        only_missing=True,
+    )
+    return {"processed": count}
 
 
 @app.get("/", response_class=HTMLResponse)

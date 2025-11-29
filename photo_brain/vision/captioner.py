@@ -59,7 +59,7 @@ def _build_caption_prompt(context: str | None) -> str:
 
 def describe_photo(
     photo: PhotoFile, exif: ExifData | None = None, context: str | None = None
-) -> VisionDescription:
+) -> Optional[VisionDescription]:
     """
     Describe a photo using the local vision model.
 
@@ -70,26 +70,7 @@ def describe_photo(
     """
     model_name = os.getenv("OLLAMA_VISION_MODEL")
     if not model_name:
-        # Deterministic fallback for tests/local use when no model is configured.
-        stem = Path(photo.path).stem.replace("_", " ").replace("-", " ").strip() or "photo"
-        date_str = (
-            exif.datetime_original.strftime("%Y-%m-%d")
-            if exif and exif.datetime_original
-            else None
-        )
-        parts = [stem]
-        if date_str:
-            parts.append(date_str)
-        if context:
-            parts.append(context)
-        fallback_desc = ", ".join(parts)
-        return VisionDescription(
-            photo_id=photo.id,
-            description=fallback_desc,
-            model="fallback",
-            confidence=0.6,
-            user_context=context,
-        )
+        return None
 
     prompt = _build_caption_prompt(context)
 
@@ -129,8 +110,8 @@ def describe_photo(
 
     try:
         raw_text = raw if raw is not None else generate_vision(prompt, Path(photo.path))
-    except Exception as exc:
-        raise LocalModelError(f"Vision model call failed: {exc}") from exc
+    except Exception:
+        return None
 
     logger.debug(
         "Vision captioner raw output\nImage: %s\nPrompt:\n%s\nOutput:\n%s",

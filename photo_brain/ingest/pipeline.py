@@ -107,3 +107,42 @@ def ingest_and_index(
         build_thumbnail(Path(row.path), row.id, thumb_cache, max_size=thumb_max)
         index_photo(session, row, backend=backend, context=context, skip_if_fresh=skip_if_fresh)
     return rows
+
+
+def index_existing_photos(
+    session: Session,
+    *,
+    backend: PgVectorBackend | None = None,
+    context: str | None = None,
+    only_missing: bool = False,
+    thumb_cache: Path | None = None,
+    thumb_max_size: int | None = None,
+) -> int:
+    """
+    Re-index photos already stored in the DB.
+
+    - When only_missing=True, only rows missing vision/classifications/embeddings are processed.
+    - When only_missing=False, all rows are reprocessed with skip_if_fresh=False.
+    """
+    backend = backend or PgVectorBackend()
+    thumb_cache = thumb_cache or Path(os.getenv("THUMB_CACHE_DIR", Path(__file__).resolve().parents[2] / "thumbnails"))
+    thumb_max = thumb_max_size or int(os.getenv("THUMB_MAX_SIZE", "320"))
+    rows = session.scalars(select(PhotoFileRow)).all()
+    processed = 0
+    for row in rows:
+        has_vision = row.vision is not None
+        has_classes = bool(row.classifications)
+        has_embedding = bool(row.embeddings)
+        if only_missing and has_vision and has_classes and has_embedding:
+            continue
+        build_thumbnail(Path(row.path), row.id, thumb_cache, max_size=thumb_max)
+        index_photo(
+            session,
+            row,
+            backend=backend,
+            context=context,
+            skip_if_fresh=only_missing,
+            preserve_faces=True,
+        )
+        processed += 1
+    return processed

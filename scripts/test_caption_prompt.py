@@ -86,6 +86,9 @@ def main() -> None:
     except LocalModelError as exc:
         sys.exit(f"Captioner failed: {exc}")
 
+    if vision_desc is None:
+        sys.exit("No caption returned. Ensure the local vision model is running and responding.")
+
     print(f"Image: {photo.path}")
     print(f"Model: {model_name}")
     print("Caption:")
