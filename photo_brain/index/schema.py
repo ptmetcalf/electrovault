@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     create_engine,
     event,
     func,
@@ -190,6 +191,39 @@ class FaceIdentityRow(Base):
     )
 
     detection: Mapped[FaceDetectionRow] = relationship(back_populates="identities")
+
+
+class PersonRow(Base):
+    __tablename__ = "persons"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    display_name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    links: Mapped[list["FacePersonLinkRow"]] = relationship(
+        back_populates="person", cascade="all, delete-orphan"
+    )
+
+
+class FacePersonLinkRow(Base):
+    __tablename__ = "face_person_links"
+    __table_args__ = (UniqueConstraint("detection_id", name="uq_face_person_detection"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    detection_id: Mapped[int] = mapped_column(
+        ForeignKey("face_detections.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    person_id: Mapped[str] = mapped_column(
+        ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    detection: Mapped[FaceDetectionRow] = relationship()
+    person: Mapped[PersonRow] = relationship(back_populates="links")
 
 
 class LocationLabelRow(Base):

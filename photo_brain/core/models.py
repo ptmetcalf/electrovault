@@ -85,6 +85,22 @@ class FaceIdentity(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class Person(BaseModel):
+    id: str
+    display_name: str
+    face_count: int = 0
+    sample_photo_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class FacePreview(BaseModel):
+    """Face detection plus optional identity and photo file."""
+
+    detection: FaceDetection
+    identity: Optional[FaceIdentity] = None
+    photo: PhotoFile
+
+
 class TextEmbedding(BaseModel):
     photo_id: str
     model: str

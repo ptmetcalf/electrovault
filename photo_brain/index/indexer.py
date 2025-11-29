@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
+
+import numpy as np
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -18,18 +21,22 @@ from photo_brain.faces import detect_faces, recognize_faces
 from photo_brain.index.records import list_face_identities
 from photo_brain.vision import classify_photo, describe_photo
 
+from .location import resolve_photo_location
 from .schema import (
     ClassificationRow,
     ExifDataRow,
     FaceDetectionRow,
     FaceIdentityRow,
+    FacePersonLinkRow,
+    PersonRow,
     PhotoFileRow,
     VisionDescriptionRow,
 )
-from .location import resolve_photo_location
+from .updates import set_detection_person, upsert_person
 from .vector_backend import PgVectorBackend
 
 logger = logging.getLogger(__name__)
+FACE_MATCH_THRESHOLD = float(os.getenv("FACE_MATCH_THRESHOLD", "0.82"))
 
 
 def _build_photo_model(row: PhotoFileRow) -> PhotoFile:
@@ -40,6 +47,84 @@ def _build_photo_model(row: PhotoFileRow) -> PhotoFile:
         size_bytes=row.size_bytes,
         mtime=row.mtime,
     )
+
+
+def _normalize_vec(vec: list[float] | None) -> Optional[np.ndarray]:
+    if not vec:
+        return None
+    arr = np.array(vec, dtype=float)
+    norm = np.linalg.norm(arr)
+    if norm == 0:
+        return None
+    return arr / norm
+
+
+def _load_person_centroids(session: Session) -> dict[str, tuple[np.ndarray, str]]:
+    """Return normalized centroid vectors per person_id with display names."""
+    stmt = (
+        select(FaceDetectionRow, FacePersonLinkRow, PersonRow, FaceIdentityRow)
+        .outerjoin(FacePersonLinkRow, FacePersonLinkRow.detection_id == FaceDetectionRow.id)
+        .outerjoin(PersonRow, PersonRow.id == FacePersonLinkRow.person_id)
+        .outerjoin(FaceIdentityRow, FaceIdentityRow.detection_id == FaceDetectionRow.id)
+        .where(FaceDetectionRow.encoding.is_not(None))
+    )
+    per_person: dict[str, list[np.ndarray]] = {}
+    labels: dict[str, str] = {}
+    for det_row, link_row, person_row, identity_row in session.execute(stmt).all():
+        norm = _normalize_vec(det_row.encoding)
+        if norm is None:
+            continue
+        person_id = None
+        display_name = None
+        if link_row and person_row:
+            person_id = link_row.person_id
+            display_name = person_row.display_name
+        elif identity_row and identity_row.person_label:
+            person_id = identity_row.person_label
+            display_name = identity_row.person_label
+        if not person_id:
+            continue
+        labels.setdefault(person_id, display_name or person_id)
+        per_person.setdefault(person_id, []).append(norm)
+
+    centroids: dict[str, tuple[np.ndarray, str]] = {}
+    for person_id, vecs in per_person.items():
+        centroid = np.mean(vecs, axis=0)
+        norm = np.linalg.norm(centroid)
+        if norm == 0:
+            continue
+        centroids[person_id] = (centroid / norm, labels.get(person_id, person_id))
+    return centroids
+
+
+def _match_detections_to_persons(
+    detections: list[FaceDetection], centroids: dict[str, tuple[np.ndarray, str]]
+) -> dict[int, FaceIdentity]:
+    matches: dict[int, FaceIdentity] = {}
+    if not centroids:
+        return matches
+    centroid_items = list(centroids.items())
+    for idx, detection in enumerate(detections):
+        det_vec = _normalize_vec(detection.encoding)
+        if det_vec is None:
+            continue
+        best_score = 0.0
+        best_person: Optional[str] = None
+        best_label: Optional[str] = None
+        for person_id, (centroid_vec, display_name) in centroid_items:
+            score = float(det_vec.dot(centroid_vec))
+            if score > best_score:
+                best_score = score
+                best_person = person_id
+                best_label = display_name
+        if best_person and best_score >= FACE_MATCH_THRESHOLD:
+            matches[idx] = FaceIdentity(
+                person_id=best_person,
+                detection_id=None,
+                label=best_label or best_person,
+                confidence=best_score,
+            )
+    return matches
 
 
 def _load_exif_model(row: Optional[ExifDataRow]) -> Optional[ExifData]:
@@ -190,6 +275,8 @@ def index_photo(
         session.execute(delete(FaceDetectionRow).where(FaceDetectionRow.photo_id == photo_row.id))
         logger.info("Index: detecting faces for photo %s", photo_row.id)
         detections = detect_faces(photo_model)
+        centroids = _load_person_centroids(session)
+        matches = _match_detections_to_persons(detections, centroids)
         identities = recognize_faces(detections)
         for idx, detection in enumerate(detections):
             det_row = FaceDetectionRow(
@@ -203,14 +290,19 @@ def index_photo(
             )
             session.add(det_row)
             session.flush()
-            identity = identities[idx] if idx < len(identities) else None
+            identity = matches.get(idx) or (identities[idx] if idx < len(identities) else None)
             if identity:
-                session.add(
-                    FaceIdentityRow(
-                        detection_id=det_row.id,
-                        person_label=identity.person_id or identity.label or "unknown",
-                        confidence=identity.confidence,
-                    )
+                display_name = identity.label or identity.person_id or "unknown"
+                person = upsert_person(
+                    session,
+                    display_name=display_name,
+                    person_id=identity.person_id,
+                )
+                set_detection_person(
+                    session,
+                    detection_id=det_row.id,
+                    person=person,
+                    confidence=identity.confidence,
                 )
         session.flush()
 

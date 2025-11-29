@@ -1,3 +1,4 @@
+import mimetypes
 import os
 from io import BytesIO
 from pathlib import Path
@@ -20,11 +21,15 @@ from photo_brain.index import (
     index_photo,
     init_db,
     load_photo_record,
+    list_face_previews,
+    list_persons,
+    merge_persons,
+    rename_person,
     session_factory,
-    upsert_user_location,
     set_photo_user_context,
+    upsert_user_location,
 )
-from photo_brain.index.schema import FaceDetectionRow
+from photo_brain.index.schema import FaceDetectionRow, FaceIdentityRow, FacePersonLinkRow, PersonRow
 from photo_brain.ingest import index_existing_photos, ingest_directory
 from photo_brain.search import execute_search, plan_search
 
@@ -99,6 +104,68 @@ class LocationCreateRequest(BaseModel):
     longitude: float
     radius_meters: int = 100
     photo_id: str | None = None
+
+
+class PersonRenameRequest(BaseModel):
+    display_name: str
+
+
+class PersonMergeRequest(BaseModel):
+    source_id: str
+    target_id: str
+
+
+@app.get("/faces")
+def list_faces(
+    *,
+    unassigned: bool | None = Query(None),
+    person: str | None = Query(None),
+    limit: int = Query(24, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session),
+) -> dict:
+    faces, total = list_face_previews(
+        session, unassigned=unassigned, person=person, limit=limit, offset=offset
+    )
+    return {
+        "faces": [face.model_dump() for face in faces],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/persons")
+def persons(
+    *,
+    search: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session),
+) -> dict:
+    people, total = list_persons(session, search=search, limit=limit, offset=offset)
+    return {
+        "persons": [person.model_dump() for person in people],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.post("/persons/{person_id}/rename")
+def rename_person_endpoint(
+    person_id: str, req: PersonRenameRequest, session: Session = Depends(get_session)
+) -> dict:
+    person = rename_person(session, person_id, req.display_name.strip())
+    session.commit()
+    return {"person": {"id": person.id, "display_name": person.display_name}}
+
+
+@app.post("/persons/merge")
+def merge_person_endpoint(req: PersonMergeRequest, session: Session = Depends(get_session)) -> dict:
+    target = merge_persons(session, req.source_id, req.target_id)
+    session.commit()
+    return {"person": {"id": target.id, "display_name": target.display_name}}
 
 
 @app.post("/reindex")
@@ -237,6 +304,55 @@ def thumbnail(photo_id: str, session: Session = Depends(get_session)) -> Respons
             return Response(content=buf.getvalue(), media_type="image/jpeg")
     except Exception as exc:  # pragma: no cover - fallback for unexpected image errors
         raise HTTPException(status_code=500, detail=f"Error generating thumbnail: {exc}") from exc
+
+
+@app.get("/photos/{photo_id}/image")
+def full_image(photo_id: str, session: Session = Depends(get_session)) -> Response:
+    """Return the original image file for a photo."""
+    row = session.get(PhotoFileRow, photo_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    path = Path(row.path)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Photo file missing")
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media_type)
+
+
+@app.get("/faces/{detection_id}/crop")
+def face_crop(
+    detection_id: int,
+    size: int = Query(320, ge=32, le=1024),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Return a cropped JPEG of a detected face."""
+    detection = session.get(FaceDetectionRow, detection_id)
+    if not detection:
+        raise HTTPException(status_code=404, detail="Face detection not found")
+    photo_row = detection.photo or session.get(PhotoFileRow, detection.photo_id)
+    if not photo_row:
+        raise HTTPException(status_code=404, detail="Photo not found for detection")
+    path = Path(photo_row.path)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Photo file missing")
+
+    try:
+        with Image.open(path) as img:
+            img = img.convert("RGB")
+            width, height = img.size
+            x1 = int(max(0, min(detection.bbox_x1, width)))
+            y1 = int(max(0, min(detection.bbox_y1, height)))
+            x2 = int(max(x1 + 1, min(detection.bbox_x2, width)))
+            y2 = int(max(y1 + 1, min(detection.bbox_y2, height)))
+            face_img = img.crop((x1, y1, x2, y2))
+            face_img.thumbnail((size, size))
+            buf = BytesIO()
+            face_img.save(buf, format="JPEG", quality=90)
+            return Response(content=buf.getvalue(), media_type="image/jpeg")
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - unexpected image errors
+        raise HTTPException(status_code=500, detail=f"Error generating face crop: {exc}") from exc
 
 
 class BulkIndexRequest(BaseModel):

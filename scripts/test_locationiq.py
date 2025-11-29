@@ -26,8 +26,8 @@ from photo_brain.core.env import load_dotenv_if_present
 from photo_brain.core.models import PhotoFile
 from photo_brain.index.location import LocationResolverConfig, resolve_photo_location
 from photo_brain.index.schema import PhotoLocationRow, init_db, session_factory
-from photo_brain.ingest.pipeline import upsert_photo
 from photo_brain.ingest.exif_reader import read_exif
+from photo_brain.ingest.pipeline import upsert_photo
 
 
 def _hash_file(path: Path, chunk_size: int = 1024 * 1024) -> str:

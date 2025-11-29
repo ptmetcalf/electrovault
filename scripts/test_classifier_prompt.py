@@ -23,8 +23,8 @@ if str(ROOT) not in sys.path:
 
 from photo_brain.core.env import load_dotenv_if_present
 from photo_brain.core.models import PhotoFile
-from photo_brain.vision.classifier import _build_classifier_prompt, classify_photo
 from photo_brain.vision import model_client
+from photo_brain.vision.classifier import _build_classifier_prompt, classify_photo
 
 
 def _hash_file(path: Path, chunk_size: int = 1024 * 1024) -> str:

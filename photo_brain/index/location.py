@@ -292,7 +292,13 @@ def resolve_photo_location(
 
     resolved.radius_meters = config.cache_radius_meters
     label_row = _ensure_label(session, resolved)
-    _assign_photo_location(session, photo, label_row, method="api", confidence=resolved.raw.get("importance") if resolved.raw else None)
+    _assign_photo_location(
+        session,
+        photo,
+        label_row,
+        method="api",
+        confidence=resolved.raw.get("importance") if resolved.raw else None,
+    )
 
 
 def upsert_user_location(

@@ -1,19 +1,27 @@
 """Database and vector index layer for Photo Brain."""
 
 from .indexer import index_photo
-from .records import build_photo_record, list_face_identities, load_photo_record
 from .location import (
     LocationResolverConfig,
     assign_user_location,
     resolve_photo_location,
     upsert_user_location,
 )
+from .records import (
+    build_photo_record,
+    list_face_identities,
+    list_face_previews,
+    list_persons,
+    load_photo_record,
+)
 from .schema import (
     Base,
     ClassificationRow,
     ExifDataRow,
     FaceDetectionRow,
+    FacePersonLinkRow,
     FaceIdentityRow,
+    PersonRow,
     LocationLabelRow,
     MemoryEventRow,
     PhotoFileRow,
@@ -25,7 +33,7 @@ from .schema import (
     init_db,
     session_factory,
 )
-from .updates import assign_face_identity, set_photo_user_context
+from .updates import assign_face_identity, merge_persons, rename_person, set_photo_user_context
 from .vector_backend import PgVectorBackend
 
 __all__ = [
@@ -33,8 +41,12 @@ __all__ = [
     "ClassificationRow",
     "ExifDataRow",
     "assign_face_identity",
+    "merge_persons",
+    "rename_person",
     "FaceDetectionRow",
     "FaceIdentityRow",
+    "FacePersonLinkRow",
+    "PersonRow",
     "LocationLabelRow",
     "MemoryEventRow",
     "PhotoFileRow",
@@ -44,9 +56,13 @@ __all__ = [
     "build_photo_record",
     "index_photo",
     "list_face_identities",
+    "list_face_previews",
+    "list_persons",
     "load_photo_record",
     "resolve_photo_location",
     "assign_user_location",
+    "rename_person",
+    "merge_persons",
     "set_photo_user_context",
     "PgVectorBackend",
     "LocationResolverConfig",

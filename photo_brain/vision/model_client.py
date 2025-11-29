@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import re
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Literal
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
@@ -25,6 +26,9 @@ _BLOCKED_OBJECTS = {
     "bird",
 }
 _BLOCKED_CATEGORIES = {"people-count", "people-attr", "age-band", "gender", "pets-count"}
+
+
+logger = logging.getLogger(__name__)
 
 
 class LocalModelError(RuntimeError):
@@ -73,6 +77,18 @@ def _temperature() -> Optional[float]:
     return max(0.0, min(val, 1.0))
 
 
+def _num_predict() -> Optional[int]:
+    raw = os.getenv("OLLAMA_VISION_NUM_PREDICT") or os.getenv("OLLAMA_NUM_PREDICT")
+    if raw is None:
+        return 400
+    try:
+        val = int(raw)
+    except ValueError:
+        return 400
+    # Keep within a reasonable range to avoid runaway generations.
+    return max(64, min(val, 4096))
+
+
 def generate_vision(prompt: str, image_path: Path) -> str:
     """Call a local vision-capable model (e.g., LLaVA on Ollama) to get a caption."""
     parsed, raw = generate_vision_structured(prompt, image_path, schema=None)
@@ -88,7 +104,7 @@ def _call_vision_api(
     if not model:
         raise LocalModelError("OLLAMA_VISION_MODEL not set")
 
-    timeout = int(os.getenv("OLLAMA_HTTP_TIMEOUT", "60"))
+    timeout = int(os.getenv("OLLAMA_HTTP_TIMEOUT", "120"))
     payload: Dict[str, Any] = {
         "model": model,
         "prompt": prompt,
@@ -98,6 +114,9 @@ def _call_vision_api(
     temp = _temperature()
     if temp is not None:
         payload["temperature"] = temp
+    num_predict = _num_predict()
+    if num_predict:
+        payload["options"] = {"num_predict": num_predict}
     if schema:
         # Follow Ollama structured output docs: send the JSON schema directly.
         payload["format"] = schema
@@ -113,6 +132,13 @@ def _call_vision_api(
             try:
                 return json.loads(content), content
             except json.JSONDecodeError as exc:
+                logger.warning(
+                    "Vision structured JSON decode failed (done_reason=%s, eval_count=%s, prompt_eval_count=%s): %s",
+                    response.get("done_reason"),
+                    response.get("eval_count"),
+                    response.get("prompt_eval_count"),
+                    exc,
+                )
                 raise LocalModelError(f"Structured response was not JSON: {exc}") from exc
         if isinstance(content, dict):
             return content, content
@@ -454,7 +480,8 @@ def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Opti
         parsed_summary = _summarize_for_log(validated or parsed)
         raw_summary = _summarize_for_log(raw_content)
         raise LocalModelError(
-            f"No usable labels from vision model (used_schema={used_schema}, parsed={parsed_summary}, raw={raw_summary})"
+            "No usable labels from vision model "
+            f"(used_schema={used_schema}, parsed={parsed_summary}, raw={raw_summary})"
         )
 
     return results, raw_content

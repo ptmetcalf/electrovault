@@ -2,7 +2,7 @@ VENV ?= .venv
 PYTHON ?= $(VENV)/bin/python
 PIP ?= $(VENV)/bin/pip
 
-.PHONY: help venv install lint format test test-cov api frontend-install frontend-dev frontend-build ingest-sample
+.PHONY: help venv install lint format test test-cov api frontend-install frontend-dev frontend-build ingest-sample dev
 
 help: ## List available make commands
 	@echo "Available make commands:"
@@ -10,6 +10,11 @@ help: ## List available make commands
 
 venv: ## Create virtual environment at $(VENV)
 	python3 -m venv $(VENV)
+
+deps: ## Create venv (if needed) and install Python requirements
+	test -d $(VENV) || python3 -m venv $(VENV)
+	$(PIP) install --upgrade pip
+	$(PIP) install -e ".[dev]"
 
 install: venv ## Install Python deps and frontend deps
 	$(PIP) install --upgrade pip
@@ -44,3 +49,10 @@ frontend-build: ## Build frontend assets
 
 ingest-sample: ## Ingest sample phototest directory
 	$(PYTHON) scripts/ingest.py $(PWD)/phototest
+
+dev: ## Run API + Vite dev server together (Ctrl+C stops both)
+	@echo "Starting API on :8000 and Vite dev server..."
+	@bash -c 'trap "kill 0" INT TERM EXIT; \
+		($(PYTHON) -m uvicorn photo_brain.api.http_api:app --host 0.0.0.0 --port 8000 --reload &); \
+		(cd frontend && npm run dev -- --host); \
+		wait'

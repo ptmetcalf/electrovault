@@ -357,3 +357,38 @@ def map_label(prefix: Optional[str], value: str) -> Optional[Canonical]:
         if v in {"portrait", "selfie", "group", "family", "pet", "child", "adult"}:
             return None, v
     return None
+
+
+def taxonomy_labels(include_people_and_pets: bool = True) -> list[str]:
+    """
+    Return canonical label strings with prefixes for embedding/scoring.
+
+    Example: ["scene:indoor", "object:tree", "activity:cooking", "bucket:people"]
+    """
+    labels: set[str] = set()
+
+    labels.update(f"scene:{s}" for s in SCENES)
+    labels.update(f"activity:{a}" for a in ACTIVITIES)
+    labels.update(f"event:{e}" for e in EVENTS)
+    labels.update(f"color:{c}" for c in COLORS)
+    labels.update(f"brand:{b}" for b in BRANDS)
+    labels.update(f"time:{t}" for t in TIME_OF_DAY)
+    labels.update(f"weather:{w}" for w in WEATHER)
+    labels.update(f"quality:{q}" for q in QUALITY)
+    labels.update(f"bucket:{b}" for b in BUCKETS)
+
+    for obj in OBJECTS:
+        if not include_people_and_pets and obj in {
+            "person",
+            "adult",
+            "child",
+            "baby",
+            "pet",
+            "dog",
+            "cat",
+            "bird",
+        }:
+            continue
+        labels.add(f"object:{obj}")
+
+    return sorted(labels)

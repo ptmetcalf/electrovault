@@ -44,6 +44,9 @@ If you previously installed before the dev extra was added, clear the old editab
 - Open `http://localhost:8000` for the React UI or hit `/events` for event summaries. The backend auto-ingests the `phototest/` directory by default; set `AUTO_INGEST_DIR=/absolute/path` to change it.
   - Auto-ingest skips unchanged photos (same mtime/context); set `AUTO_INGEST_FORCE=1` to force re-index on startup. Use `AUTO_INGEST_CONTEXT` to inject user context during auto-ingest.
   - Thumbnails: `GET /thumb/{photo_id}` returns a JPEG thumbnail (max size controlled by `THUMB_MAX_SIZE`, default 320).
+  - Full-size: `GET /photos/{photo_id}/image` streams the original photo bytes.
+  - Faces: `GET /faces` lists detections (filter with `?unassigned=1` or `?person=alice`); `GET /faces/{detection_id}/crop` returns a cropped face JPEG for labeling. `GET /persons` lists known people; `POST /persons/{person_id}/rename` updates a display name; `POST /persons/merge` moves detections to a single person.
+  - Face matching: set `FACE_MATCH_THRESHOLD` (default `0.82`) to tune auto-matching of new detections to existing people based on stored encodings.
 
 ## Using Local Vision + Embedding Models (Ollama/LM Studio)
 
@@ -55,6 +58,7 @@ Out of the box, captions/classifications/embeddings use deterministic fallbacks.
    - `OLLAMA_BASE_URL` (optional, default `http://localhost:11434`)
    - `OLLAMA_VISION_MODEL=llava:latest`
    - `OLLAMA_EMBED_MODEL=nomic-embed-text`
+   - Optional tuning (defaults are safe): `OLLAMA_VISION_NUM_PREDICT=400` for longer JSON outputs, `OLLAMA_HTTP_TIMEOUT=120` if your model runs slowly
 3) Ingest photos (see CLI below) and start the API/UI. The vision/tagging pipeline will call your local model; embeddings will use the embed model. If the model call fails, the code falls back to deterministic heuristics so tests/local runs remain stable.
 
 ### .env convenience

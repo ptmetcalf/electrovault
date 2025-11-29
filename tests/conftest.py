@@ -13,4 +13,5 @@ def force_detector_fallback(monkeypatch):
         raise RuntimeError("skip net")
 
     monkeypatch.setattr(detector, "_load_net", _fail)
+    monkeypatch.setenv("FACE_DETECT_ALLOW_FALLBACK", "1")
     yield

@@ -44,14 +44,30 @@ type EventSummary = {
   photo_ids: string[];
 };
 
+type FacePreview = {
+  detection: Detection;
+  identity?: Face | null;
+  photo: { id: string; path: string };
+};
+
+type Person = {
+  id: string;
+  display_name: string;
+  face_count: number;
+  sample_photo_id?: string | null;
+};
+
+type Mode = "search" | "browse" | "faces";
+
 const API_BASE = "";
 const formatScore = (score: number) => score.toFixed(3);
 const PAGE_SIZE = 48;
+const FACE_PAGE_SIZE = 40;
 
 export default function App() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [mode, setMode] = useState<"search" | "browse">("search");
+  const [mode, setMode] = useState<Mode>("search");
   const [browseRecords, setBrowseRecords] = useState<PhotoRecord[]>([]);
   const [browseTotal, setBrowseTotal] = useState(0);
   const [browsePage, setBrowsePage] = useState(0);
@@ -71,10 +87,23 @@ export default function App() {
   const [maintenanceStatus, setMaintenanceStatus] = useState<string | null>(null);
   const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
   const [preserveFaces, setPreserveFaces] = useState(true);
+  const [faceItems, setFaceItems] = useState<FacePreview[]>([]);
+  const [faceTotal, setFaceTotal] = useState(0);
+  const [facePage, setFacePage] = useState(0);
+  const [faceLoading, setFaceLoading] = useState(false);
+  const [faceFilterPerson, setFaceFilterPerson] = useState("");
+  const [faceUnassignedOnly, setFaceUnassignedOnly] = useState(true);
+  const [faceLabelDrafts, setFaceLabelDrafts] = useState<Record<number, string>>({});
+  const [savingFaceId, setSavingFaceId] = useState<number | null>(null);
+  const [faceError, setFaceError] = useState<string | null>(null);
+  const [persons, setPersons] = useState<Person[]>([]);
 
   const cards = useMemo(() => {
     if (mode === "browse") {
       return browseRecords.map((rec) => ({ record: rec, score: null as number | null }));
+    }
+    if (mode === "faces") {
+      return [];
     }
     return results;
   }, [mode, browseRecords, results]);
@@ -94,6 +123,11 @@ export default function App() {
     });
     return map;
   }, [selectedPhoto]);
+
+  const selectedFullImage = selectedPhoto
+    ? `${API_BASE}/photos/${selectedPhoto.file.id}/image`
+    : null;
+  const selectedThumbImage = selectedPhoto ? `${API_BASE}/thumb/${selectedPhoto.file.id}` : null;
 
   function updateResultRecord(next: PhotoRecord) {
     setResults((prev) =>
@@ -165,6 +199,25 @@ export default function App() {
     }
   }
 
+  async function assignFaceLabel(
+    photoId: string,
+    detectionId: number,
+    value: string
+  ): Promise<PhotoRecord | null> {
+    const res = await fetch(`${API_BASE}/photos/${photoId}/faces`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        detection_id: detectionId,
+        person_label: value,
+        reindex: true,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return data.photo || null;
+  }
+
   async function saveFaceLabel(detectionId: number) {
     if (!selectedPhoto) return;
     const value = faceEdits[detectionId]?.trim();
@@ -175,26 +228,57 @@ export default function App() {
     setPhotoLoading(true);
     setSelectedError(null);
     try {
-      const res = await fetch(`${API_BASE}/photos/${selectedPhoto.file.id}/faces`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          detection_id: detectionId,
-          person_label: value,
-          reindex: true,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (data.photo) {
-        hydrateSelection(data.photo, selectedScore ?? undefined);
-        updateResultRecord(data.photo);
+      const updated = await assignFaceLabel(selectedPhoto.file.id, detectionId, value);
+      if (updated) {
+        hydrateSelection(updated, selectedScore ?? undefined);
+        updateResultRecord(updated);
       }
     } catch (err) {
       console.error(err);
       setSelectedError("Updating face label failed");
     } finally {
       setPhotoLoading(false);
+    }
+  }
+
+  async function saveFaceLabelFromGrid(face: FacePreview) {
+    const detectionId = face.detection.id;
+    if (detectionId == null) return;
+    const value = faceLabelDrafts[detectionId]?.trim();
+    if (!value) {
+      setFaceError("Name cannot be empty");
+      return;
+    }
+    setSavingFaceId(detectionId);
+    setFaceError(null);
+    try {
+      const updated = await assignFaceLabel(face.photo.id, detectionId, value);
+      if (updated && selectedPhoto?.file.id === updated.file.id) {
+        hydrateSelection(updated, selectedScore ?? undefined);
+        updateResultRecord(updated);
+      }
+      setFaceItems((prev) =>
+        prev.map((item) =>
+          item.detection.id === detectionId
+            ? {
+                ...item,
+                identity: {
+                  detection_id: detectionId,
+                  person_id: value,
+                  label: value,
+                },
+              }
+            : item
+        )
+      );
+      if (faceUnassignedOnly) {
+        await loadFaces(facePage);
+      }
+    } catch (err) {
+      console.error(err);
+      setFaceError("Saving face name failed");
+    } finally {
+      setSavingFaceId(null);
     }
   }
 
@@ -252,6 +336,59 @@ export default function App() {
       console.error(err);
     } finally {
       setBrowseLoading(false);
+    }
+  }
+
+  async function loadPersons() {
+    try {
+      const res = await fetch(`${API_BASE}/persons?limit=200`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setPersons(data.persons || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function loadFaces(page: number, overrides?: { unassignedOnly?: boolean; person?: string }) {
+    const useUnassigned = overrides?.unassignedOnly ?? faceUnassignedOnly;
+    const personFilter = overrides?.person ?? faceFilterPerson;
+    setMode("faces");
+    setFaceLoading(true);
+    setFaceError(null);
+    setError(null);
+    setSelectedPhoto(null);
+    setSelectedScore(null);
+    setResults([]);
+    setBrowseRecords([]);
+    setBrowseTotal(0);
+    try {
+      const params = new URLSearchParams();
+      params.set("limit", FACE_PAGE_SIZE.toString());
+      params.set("offset", (page * FACE_PAGE_SIZE).toString());
+      if (useUnassigned) params.set("unassigned", "true");
+      if (personFilter.trim()) params.set("person", personFilter.trim());
+      const res = await fetch(`${API_BASE}/faces?${params.toString()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const faces: FacePreview[] = data.faces || [];
+      setFaceItems(faces);
+      setFaceTotal(data.total || faces.length);
+      setFacePage(page);
+      const drafts: Record<number, string> = {};
+      faces.forEach((f) => {
+        const id = f.detection.id;
+        if (id != null) {
+          drafts[id] = f.identity?.label || f.identity?.person_id || "";
+        }
+      });
+      setFaceLabelDrafts(drafts);
+      loadPersons();
+    } catch (err) {
+      console.error(err);
+      setFaceError("Loading faces failed");
+    } finally {
+      setFaceLoading(false);
     }
   }
 
@@ -352,11 +489,27 @@ export default function App() {
               <button
                 type="button"
                 className="secondary"
+                onClick={() => loadFaces(0)}
+                disabled={faceLoading}
+              >
+                {faceLoading ? "Loading faces..." : "Faces"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
                 onClick={() => {
                   setQuery("");
                   setResults([]);
                   setBrowseRecords([]);
                   setBrowseTotal(0);
+                  setFaceItems([]);
+                  setFaceTotal(0);
+                  setFacePage(0);
+                  setFaceLabelDrafts({});
+                  setFaceFilterPerson("");
+                  setFaceUnassignedOnly(true);
+                  setFaceError(null);
+                  setPersons([]);
                   setMode("search");
                   setSelectedLabels(new Set());
                   setError(null);
@@ -424,7 +577,11 @@ export default function App() {
                       className={`badge ${active ? "active" : ""}`}
                       onClick={() => {
                         const next = new Set(selectedLabels);
-                        active ? next.delete(l) : next.add(l);
+                        if (active) {
+                          next.delete(l);
+                        } else {
+                          next.add(l);
+                        }
                         setSelectedLabels(next);
                       }}
                     >
@@ -468,13 +625,18 @@ export default function App() {
               <div className="detail-body">
                 <div className="image-frame">
                   <img
-                    src={`${API_BASE}/thumb/${selectedPhoto.file.id}`}
+                    src={selectedFullImage || selectedThumbImage || ""}
                     alt="Selected"
                     onLoad={(evt) => {
                       setImageSize({
                         width: evt.currentTarget.naturalWidth,
                         height: evt.currentTarget.naturalHeight,
                       });
+                    }}
+                    onError={(evt) => {
+                      if (selectedThumbImage && evt.currentTarget.src !== selectedThumbImage) {
+                        evt.currentTarget.src = selectedThumbImage;
+                      }
                     }}
                   />
                   {imageSize &&
@@ -483,6 +645,7 @@ export default function App() {
                       .map((det) => {
                         if (!det.id || !imageSize.width || !imageSize.height) return null;
                         const [x1, y1, x2, y2] = det.bbox;
+                        if (x2 <= x1 || y2 <= y1) return null;
                         const left = (x1 / imageSize.width) * 100;
                         const top = (y1 / imageSize.height) * 100;
                         const width = ((x2 - x1) / imageSize.width) * 100;
@@ -604,84 +767,221 @@ export default function App() {
               {selectedError && <div className="error">{selectedError}</div>}
             </div>
           )}
-          <div className="cards">
-            {(loading || browseLoading) && <div className="empty">Loading…</div>}
-            {!loading && !browseLoading && cards.length === 0 && (
-              <div className="empty">No results yet. Try “family” or “birthday”.</div>
-            )}
-            {!loading &&
-              !browseLoading &&
-              cards
-                .filter((item) => {
-                  if (!selectedLabels.size) return true;
-                  const labels = item.record.classifications.map((c) => c.label);
-                  return Array.from(selectedLabels).every((l) => labels.includes(l));
-                })
-                .map((item) => {
-                  const path = item.record.file.path.split("/").pop() || item.record.file.path;
-                  const people = item.record.faces
-                    .map((f) => f.person_id || f.label)
-                    .filter(Boolean)
-                    .join(", ");
-                  const labels = Array.from(
-                    new Set(item.record.classifications.map((c) => c.label))
-                  ).slice(0, 6);
-                  const thumb = `${API_BASE}/thumb/${item.record.file.id}`;
-                  return (
-                    <div key={item.record.file.id} className="card">
-                      <div className="flex-between">
-                        <strong className="truncate">{path}</strong>
-                        {item.score != null && (
-                          <span className="pill small">Score {formatScore(item.score)}</span>
-                        )}
-                      </div>
-                      <div className="thumb">
-                        <img src={thumb} alt={path} />
-                      </div>
-                      <div className="meta">
-                        {item.record.vision ? item.record.vision.description : "No caption"}
-                      </div>
-                      {people && <div className="meta">People: {people}</div>}
-                      <div className="row wrap">
-                        {labels.map((l) => (
-                          <span key={l} className="badge">
-                            {l}
-                          </span>
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => openPhoto(item.record, item.score ?? undefined)}
-                      >
-                        Faces & context
-                      </button>
-                    </div>
-                  );
-                })}
-          </div>
-          {mode === "browse" && browseTotal > PAGE_SIZE && (
-            <div className="row space pager">
-              <button
-                type="button"
-                className="secondary"
-                disabled={browsePage === 0 || browseLoading}
-                onClick={() => browse(Math.max(0, browsePage - 1))}
-              >
-                Previous
-              </button>
-              <div className="muted small">
-                Page {browsePage + 1} / {Math.ceil(browseTotal / PAGE_SIZE)} ({browseTotal} photos)
+          {mode === "faces" ? (
+            <>
+              <div className="panel-head">
+                <h4>Face assignment</h4>
+                <div className="row wrap">
+                  <label className="muted small">
+                    <input
+                      type="checkbox"
+                      checked={faceUnassignedOnly}
+                      onChange={(e) => {
+                        setFaceUnassignedOnly(e.target.checked);
+                        loadFaces(0, { unassignedOnly: e.target.checked });
+                      }}
+                    />{" "}
+                    Unassigned only
+                  </label>
+                  <input
+                    type="text"
+                    value={faceFilterPerson}
+                    onChange={(e) => setFaceFilterPerson(e.target.value)}
+                    placeholder="Filter by person name"
+                  />
+                  <button type="button" className="secondary" onClick={() => loadFaces(0)}>
+                    Refresh faces
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                className="secondary"
-                disabled={(browsePage + 1) * PAGE_SIZE >= browseTotal || browseLoading}
-                onClick={() => browse(browsePage + 1)}
-              >
-                Next
-              </button>
-            </div>
+              <datalist id="person-options">
+                {persons.map((p) => (
+                  <option key={p.id} value={p.display_name} />
+                ))}
+              </datalist>
+              {faceError && <div className="error">{faceError}</div>}
+              <div className="faces-grid">
+                {(faceLoading || loading) && <div className="empty">Loading faces…</div>}
+                {!faceLoading && faceItems.length === 0 && (
+                  <div className="empty">No faces found for this filter.</div>
+                )}
+                {!faceLoading &&
+                  faceItems.map((face) => {
+                    const detectionId = face.detection.id ?? 0;
+                    const path = face.photo.path.split("/").pop() || face.photo.path;
+                    const draft =
+                      faceLabelDrafts[detectionId] ??
+                      face.identity?.person_id ??
+                      face.identity?.label ??
+                      "";
+                    const cropUrl = face.detection.id
+                      ? `${API_BASE}/faces/${face.detection.id}/crop?size=420`
+                      : `${API_BASE}/thumb/${face.photo.id}`;
+                    return (
+                      <div key={`${face.photo.id}-${detectionId}`} className="face-card">
+                        <div className="flex-between">
+                          <span className="muted small">#{detectionId}</span>
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() =>
+                              openPhoto(
+                                {
+                                  file: face.photo,
+                                  vision: undefined,
+                                  classifications: [],
+                                  detections: [face.detection],
+                                  faces: face.identity ? [face.identity] : [],
+                                }
+                              )
+                            }
+                          >
+                            Open photo
+                          </button>
+                        </div>
+                        <div className="face-crop">
+                          <img src={cropUrl} alt={path} />
+                        </div>
+                        <div className="stack">
+                          <input
+                            type="text"
+                            value={draft}
+                            list="person-options"
+                            onChange={(e) =>
+                              setFaceLabelDrafts((prev) => ({
+                                ...prev,
+                                [detectionId]: e.target.value,
+                              }))
+                            }
+                            placeholder="Who is this?"
+                          />
+                          <div className="row wrap">
+                            <button
+                              type="button"
+                              onClick={() => saveFaceLabelFromGrid(face)}
+                              disabled={savingFaceId === detectionId}
+                            >
+                              {savingFaceId === detectionId ? "Saving..." : "Save name"}
+                            </button>
+                            {face.identity?.person_id && (
+                              <span className="pill small">Current: {face.identity.person_id}</span>
+                            )}
+                            <span className="pill small">
+                              Confidence {formatScore(face.detection.confidence)}
+                            </span>
+                            <span className="pill small truncate">{path}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+              {faceTotal > FACE_PAGE_SIZE && (
+                <div className="row space pager">
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={facePage === 0 || faceLoading}
+                    onClick={() => loadFaces(Math.max(0, facePage - 1))}
+                  >
+                    Previous
+                  </button>
+                  <div className="muted small">
+                    Page {facePage + 1} / {Math.ceil(faceTotal / FACE_PAGE_SIZE)} ({faceTotal} faces)
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={(facePage + 1) * FACE_PAGE_SIZE >= faceTotal || faceLoading}
+                    onClick={() => loadFaces(facePage + 1)}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="cards">
+                {(loading || browseLoading) && <div className="empty">Loading…</div>}
+                {!loading && !browseLoading && cards.length === 0 && (
+                  <div className="empty">No results yet. Try “family” or “birthday”.</div>
+                )}
+                {!loading &&
+                  !browseLoading &&
+                  cards
+                    .filter((item) => {
+                      if (!selectedLabels.size) return true;
+                      const labels = item.record.classifications.map((c) => c.label);
+                      return Array.from(selectedLabels).every((l) => labels.includes(l));
+                    })
+                    .map((item) => {
+                      const path = item.record.file.path.split("/").pop() || item.record.file.path;
+                      const people = item.record.faces
+                        .map((f) => f.person_id || f.label)
+                        .filter(Boolean)
+                        .join(", ");
+                      const labels = Array.from(
+                        new Set(item.record.classifications.map((c) => c.label))
+                      ).slice(0, 6);
+                      const thumb = `${API_BASE}/thumb/${item.record.file.id}`;
+                      return (
+                        <div key={item.record.file.id} className="card">
+                          <div className="flex-between">
+                            <strong className="truncate">{path}</strong>
+                            {item.score != null && (
+                              <span className="pill small">Score {formatScore(item.score)}</span>
+                            )}
+                          </div>
+                          <div className="thumb">
+                            <img src={thumb} alt={path} />
+                          </div>
+                          <div className="meta">
+                            {item.record.vision ? item.record.vision.description : "No caption"}
+                          </div>
+                          {people && <div className="meta">People: {people}</div>}
+                          <div className="row wrap">
+                            {labels.map((l) => (
+                              <span key={l} className="badge">
+                                {l}
+                              </span>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => openPhoto(item.record, item.score ?? undefined)}
+                          >
+                            Faces & context
+                          </button>
+                        </div>
+                      );
+                    })}
+              </div>
+              {mode === "browse" && browseTotal > PAGE_SIZE && (
+                <div className="row space pager">
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={browsePage === 0 || browseLoading}
+                    onClick={() => browse(Math.max(0, browsePage - 1))}
+                  >
+                    Previous
+                  </button>
+                  <div className="muted small">
+                    Page {browsePage + 1} / {Math.ceil(browseTotal / PAGE_SIZE)} ({browseTotal} photos)
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={(browsePage + 1) * PAGE_SIZE >= browseTotal || browseLoading}
+                    onClick={() => browse(browsePage + 1)}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </section>
       </main>

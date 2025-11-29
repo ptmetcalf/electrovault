@@ -7,7 +7,8 @@ from typing import Any, Tuple
 import numpy as np
 import pytest
 
-from photo_brain.core.models import PhotoFile
+from photo_brain import vision as vision_pkg
+from photo_brain.core.models import PhotoFile, TextEmbedding, VisionDescription
 from photo_brain.faces import detector
 from photo_brain.vision import captioner, classifier, model_client
 
@@ -67,8 +68,51 @@ def test_classifier_parses_labels(monkeypatch, tmp_path: Path) -> None:
     assert {"cat", "dog"} <= labels
 
 
+def test_classifier_embedding_fallback(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OLLAMA_VISION_MODEL", "mock-vision")
+
+    photo = _photo(tmp_path)
+
+    def fake_classify(prompt: str, path: Path):
+        raise model_client.LocalModelError("fail")
+
+    def fake_describe(photo: PhotoFile, exif=None, context=None):
+        return VisionDescription(
+            photo_id=photo.id,
+            description="a playful dog in a park",
+            model="mock-vision",
+            confidence=0.8,
+        )
+
+    def fake_embed(
+        text: str, photo_id: str | None = None, model: str = "hash-embedder", dim: int = 16
+    ):
+        # Simple deterministic vectors: dog/pets -> [1,0], misc -> [0,1]
+        vec = [1.0, 0.0] if "dog" in text or "pets_animals" in text else [0.0, 1.0]
+        return TextEmbedding(photo_id=photo_id or "q", model="fake-embed", vector=vec, dim=2)
+
+    monkeypatch.setattr(classifier, "classify_vision", fake_classify)
+    monkeypatch.setattr(classifier, "describe_photo", fake_describe)
+    monkeypatch.setattr(classifier, "embed_description", fake_embed)
+    monkeypatch.setattr(
+        vision_pkg.taxonomy,
+        "taxonomy_labels",
+        lambda include_people_and_pets=True: [
+            "bucket:pets_animals",
+            "bucket:misc_other",
+            "object:tree",
+        ],
+    )
+
+    classes = classifier.classify_photo(photo, context=None)
+    assert classes is not None
+    labels = {c.label for c in classes}
+    assert "bucket:pets_animals" in labels
+
+
 def test_detector_fallback(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("FACE_DETECT_THRESHOLD", "0.9")
+    monkeypatch.setenv("FACE_DETECT_ALLOW_FALLBACK", "1")
 
     def _fail():
         raise RuntimeError("fail")

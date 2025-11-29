@@ -82,9 +82,7 @@ def describe_photo(
     """
     model_name = os.getenv("OLLAMA_VISION_MODEL")
     if not model_name:
-        logger.debug(
-            "Vision captioner: OLLAMA_VISION_MODEL not set; skipping %s", photo.path
-        )
+        logger.debug("Vision captioner: OLLAMA_VISION_MODEL not set; skipping %s", photo.path)
         return None
 
     prompt = _build_caption_prompt(context)

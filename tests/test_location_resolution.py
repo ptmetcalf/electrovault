@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+
 from sqlalchemy.orm import sessionmaker
 
 from photo_brain.core.models import ExifData, LocationLabel
@@ -11,7 +12,7 @@ from photo_brain.index import (
     session_factory,
     upsert_user_location,
 )
-from photo_brain.index.location import LocationProvider, _pick_location_name
+from photo_brain.index.location import _pick_location_name
 
 
 class StubProvider:
@@ -141,9 +142,8 @@ def test_pick_location_name_formats_address_without_county() -> None:
             "postcode": "53551",
             "country": "USA",
         },
-        "display_name": "137, Sandy Beach Road, Lake Mills, Jefferson County, Wisconsin, 53551, USA",
+        "display_name": (
+            "137, Sandy Beach Road, Lake Mills, Jefferson County, Wisconsin, 53551, USA"
+        ),
     }
-    assert (
-        _pick_location_name(data)
-        == "137 Sandy Beach Road, Lake Mills, Wisconsin, 53551, USA"
-    )
+    assert _pick_location_name(data) == "137 Sandy Beach Road, Lake Mills, Wisconsin, 53551, USA"
