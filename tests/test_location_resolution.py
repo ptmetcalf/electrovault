@@ -128,3 +128,22 @@ def test_pick_location_name_prefers_poi_over_address() -> None:
         "display_name": "123 Main St, Gotham",
     }
     assert _pick_location_name(data_no_poi) == "123 Main St"
+
+
+def test_pick_location_name_formats_address_without_county() -> None:
+    data = {
+        "address": {
+            "house_number": "137",
+            "road": "Sandy Beach Road",
+            "city": "Lake Mills",
+            "county": "Jefferson County",
+            "state": "Wisconsin",
+            "postcode": "53551",
+            "country": "USA",
+        },
+        "display_name": "137, Sandy Beach Road, Lake Mills, Jefferson County, Wisconsin, 53551, USA",
+    }
+    assert (
+        _pick_location_name(data)
+        == "137 Sandy Beach Road, Lake Mills, Wisconsin, 53551, USA"
+    )

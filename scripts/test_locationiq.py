@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -113,6 +114,11 @@ def main() -> None:
         print(f"- Label ID: {label.id}")
         if label.raw:
             print("- Raw snippet:", {k: label.raw.get(k) for k in ("type", "display_name", "name")})
+            try:
+                print("Full raw response:")
+                print(json.dumps(label.raw, indent=2))
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

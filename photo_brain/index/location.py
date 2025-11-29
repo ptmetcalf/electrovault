@@ -104,6 +104,23 @@ def _pick_location_name(data: dict[str, Any]) -> str:
         return data["name"].strip()
 
     address = data.get("address") if isinstance(data.get("address"), dict) else {}
+
+    house_number = address.get("house_number")
+    road = address.get("road")
+    if isinstance(house_number, str) and house_number.strip() and isinstance(road, str):
+        locality_fields = ["city", "town", "village", "hamlet", "suburb", "neighbourhood"]
+        locality = next(
+            (address.get(f) for f in locality_fields if isinstance(address.get(f), str)), None
+        )
+        state = address.get("state") if isinstance(address.get("state"), str) else None
+        postcode = address.get("postcode") if isinstance(address.get("postcode"), str) else None
+        country = address.get("country") if isinstance(address.get("country"), str) else None
+        parts = [f"{house_number.strip()} {road.strip()}"]
+        for part in (locality, state, postcode, country):
+            if part and str(part).strip():
+                parts.append(str(part).strip())
+        return ", ".join(parts)
+
     priority_fields = [
         "shop",
         "amenity",
