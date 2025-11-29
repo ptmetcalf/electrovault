@@ -50,6 +50,7 @@ class Classification(BaseModel):
 
 
 class FaceDetection(BaseModel):
+    id: Optional[int] = None
     photo_id: str
     bbox: tuple[float, float, float, float]
     confidence: float
@@ -79,6 +80,7 @@ class PhotoRecord(BaseModel):
     vision: Optional[VisionDescription] = None
     classifications: list[Classification] = Field(default_factory=list)
     embedding: Optional[TextEmbedding] = None
+    detections: list[FaceDetection] = Field(default_factory=list)
     faces: list[FaceIdentity] = Field(default_factory=list)
     event_ids: list[str] = Field(default_factory=list)
 

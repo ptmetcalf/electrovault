@@ -11,7 +11,17 @@ from sqlalchemy.orm import Session
 
 from photo_brain.core.env import load_dotenv_if_present
 from photo_brain.events import group_events, summarize_events
-from photo_brain.index import PgVectorBackend, PhotoFileRow, init_db, session_factory
+from photo_brain.index import (
+    PgVectorBackend,
+    PhotoFileRow,
+    assign_face_identity,
+    init_db,
+    index_photo,
+    load_photo_record,
+    session_factory,
+    set_photo_user_context,
+)
+from photo_brain.index.schema import FaceDetectionRow
 from photo_brain.ingest import ingest_and_index
 from photo_brain.search import execute_search, plan_search
 
@@ -63,6 +73,18 @@ def list_events(session: Session = Depends(get_session)) -> dict:
 class ReindexRequest(BaseModel):
     photo_id: str
     context: str | None = None
+    preserve_faces: bool = True
+
+
+class FaceAssignmentRequest(BaseModel):
+    detection_id: int
+    person_label: str
+    reindex: bool = True
+
+
+class ContextUpdateRequest(BaseModel):
+    context: str
+    reindex: bool = True
 
 
 @app.post("/reindex")
@@ -70,8 +92,78 @@ def reindex_photo(req: ReindexRequest, session: Session = Depends(get_session)) 
     row = session.get(PhotoFileRow, req.photo_id)
     if not row:
         raise HTTPException(status_code=404, detail="Photo not found")
-    index_photo(session, row, context=req.context)
-    return {"status": "ok"}
+    index_photo(
+        session,
+        row,
+        context=req.context,
+        skip_if_fresh=False,
+        preserve_faces=req.preserve_faces,
+    )
+    record = load_photo_record(session, req.photo_id)
+    return {"photo": record.model_dump() if record else None}
+
+
+@app.get("/photos/{photo_id}")
+def get_photo(photo_id: str, session: Session = Depends(get_session)) -> dict:
+    record = load_photo_record(session, photo_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return {"photo": record.model_dump()}
+
+
+@app.post("/photos/{photo_id}/faces")
+def assign_face(
+    photo_id: str, req: FaceAssignmentRequest, session: Session = Depends(get_session)
+) -> dict:
+    detection = session.get(FaceDetectionRow, req.detection_id)
+    if not detection or detection.photo_id != photo_id:
+        raise HTTPException(status_code=404, detail="Face detection not found")
+    person_label = req.person_label.strip()
+    if not person_label:
+        raise HTTPException(status_code=400, detail="Person label is required")
+
+    assign_face_identity(session, detection.id, person_label)
+    if req.reindex:
+        photo_row = detection.photo or session.get(PhotoFileRow, detection.photo_id)
+        if not photo_row:
+            raise HTTPException(status_code=404, detail="Photo not found for detection")
+        index_photo(
+            session,
+            photo_row,
+            context=None,
+            skip_if_fresh=False,
+            preserve_faces=True,
+        )
+    else:
+        session.commit()
+
+    record = load_photo_record(session, photo_id)
+    return {"photo": record.model_dump() if record else None}
+
+
+@app.post("/photos/{photo_id}/context")
+def update_context(
+    photo_id: str, req: ContextUpdateRequest, session: Session = Depends(get_session)
+) -> dict:
+    row = session.get(PhotoFileRow, photo_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    context_value = req.context.strip()
+
+    if req.reindex:
+        index_photo(
+            session,
+            row,
+            context=context_value,
+            skip_if_fresh=False,
+            preserve_faces=True,
+        )
+    else:
+        set_photo_user_context(session, row, context_value)
+        session.commit()
+
+    record = load_photo_record(session, photo_id)
+    return {"photo": record.model_dump() if record else None}
 
 
 @app.get("/thumb/{photo_id}")
