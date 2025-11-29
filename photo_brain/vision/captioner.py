@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from photo_brain.core.models import ExifData, PhotoFile, VisionDescription
-from photo_brain.vision.model_client import LocalModelError, generate_vision
+from photo_brain.vision.model_client import LocalModelError, generate_vision, generate_vision_structured
 
 import json
 import re
@@ -93,8 +93,42 @@ def describe_photo(
 
     prompt = _build_caption_prompt(context)
 
+    schema = {
+        "type": "object",
+        "properties": {
+            "description": {"type": "string"},
+            "confidence": {"type": "number"},
+        },
+        "required": ["description"],
+        "additionalProperties": True,
+    }
+
     try:
-        raw = generate_vision(prompt, Path(photo.path))
+        structured, raw = generate_vision_structured(prompt, Path(photo.path), schema=schema)
+    except Exception:
+        structured = None
+        raw = None
+
+    if structured and isinstance(structured, dict):
+        text = str(structured.get("description") or "").strip()
+        confidence = _normalize_conf(structured.get("confidence"))
+        if text:
+            logger.debug(
+                "Vision captioner structured output\nImage: %s\nPrompt:\n%s\nOutput:\n%s",
+                photo.path,
+                prompt,
+                structured,
+            )
+            return VisionDescription(
+                photo_id=photo.id,
+                description=text,
+                model=model_name,
+                confidence=confidence,
+                user_context=context,
+            )
+
+    try:
+        raw_text = raw if raw is not None else generate_vision(prompt, Path(photo.path))
     except Exception as exc:
         raise LocalModelError(f"Vision model call failed: {exc}") from exc
 
@@ -102,10 +136,10 @@ def describe_photo(
         "Vision captioner raw output\nImage: %s\nPrompt:\n%s\nOutput:\n%s",
         photo.path,
         prompt,
-        raw,
+        raw_text,
     )
 
-    text, confidence = _parse_caption(raw)
+    text, confidence = _parse_caption(raw_text)
 
     return VisionDescription(
         photo_id=photo.id,

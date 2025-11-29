@@ -50,6 +50,15 @@ def _embed_model() -> Optional[str]:
 
 def generate_vision(prompt: str, image_path: Path) -> str:
     """Call a local vision-capable model (e.g., LLaVA on Ollama) to get a caption."""
+    parsed, raw = generate_vision_structured(prompt, image_path, schema=None)
+    if parsed is None:
+        raise LocalModelError("No response text from vision model")
+    return str(parsed).strip()
+
+
+def _call_vision_api(
+    prompt: str, image_path: Path, *, schema: dict[str, Any] | None
+) -> tuple[Any, Any]:
     model = _vision_model()
     if not model:
         raise LocalModelError("OLLAMA_VISION_MODEL not set")
@@ -61,11 +70,36 @@ def generate_vision(prompt: str, image_path: Path) -> str:
         "stream": False,
         "images": [_encode_image(image_path)],
     }
+    if schema:
+        payload["format"] = {"type": "json", "schema": schema}
+
     response = _post_json(f"{_base_url().rstrip('/')}/api/generate", payload, timeout=timeout)
-    text = response.get("response") or response.get("content")
-    if not text:
+    content = response.get("response") or response.get("content")
+    if content is None and isinstance(response.get("message"), dict):
+        content = response["message"].get("content")
+    if content is None:
         raise LocalModelError("No response text from vision model")
-    return str(text).strip()
+    if schema:
+        if isinstance(content, str):
+            try:
+                return json.loads(content), content
+            except json.JSONDecodeError as exc:
+                raise LocalModelError(f"Structured response was not JSON: {exc}") from exc
+        if isinstance(content, dict):
+            return content, content
+        raise LocalModelError("Structured response was not JSON object")
+    return content, content
+
+
+def generate_vision_structured(
+    prompt: str, image_path: Path, *, schema: dict[str, Any] | None
+) -> tuple[Any, Any]:
+    """
+    Call the vision model with optional JSON schema formatting.
+
+    Returns (parsed, raw_content).
+    """
+    return _call_vision_api(prompt, image_path, schema=schema)
 
 
 def _normalize_label(label: str) -> Optional[str]:
@@ -212,33 +246,26 @@ class _LLMResponse(BaseModel):
         return _normalize_label(v)
 
 
-def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Optional[float]]], List[str]]:
+def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Optional[float]]], Any]:
     """Call the vision model, require schema-conformant JSON, and return normalized labels + OCR."""
-    raw = generate_vision(prompt, image_path)
-
-    def _strip_wrappers(text: str) -> str:
-        text = text.strip()
-        if text.startswith("```"):
-            parts = text.split("\n", 1)
-            text = parts[1] if len(parts) > 1 else text
-        if text.endswith("```"):
-            text = text.rsplit("```", 1)[0]
-        return text.strip()
-
-    text = _strip_wrappers(raw)
-    if not text:
-        raise LocalModelError("Empty response from vision model")
-
+    schema = _LLMResponse.model_json_schema()
     parsed: Any = None
+    raw_content: Any = None
     try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if match:
-            try:
-                parsed = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                parsed = None
+        parsed, raw_content = generate_vision_structured(prompt, image_path, schema=schema)
+    except LocalModelError:
+        # Fallback to non-structured output and best-effort parsing.
+        raw_content = generate_vision(prompt, image_path)
+        text = str(raw_content)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+            if match:
+                try:
+                    parsed = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    parsed = None
 
     validated: _LLMResponse | None = None
     if isinstance(parsed, dict):
@@ -327,7 +354,8 @@ def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Opti
 
     # Fallback parsing if structured JSON fails to yield labels.
     if not results:
-        tokens = re.split(r"[,\n]", text)
+        fallback_text = str(raw_content or "")
+        tokens = re.split(r"[,\n]", fallback_text)
         for tok in tokens:
             tok = tok.strip()
             if not tok:
@@ -341,7 +369,7 @@ def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Opti
     if not results:
         raise LocalModelError("No usable labels from vision model")
 
-    return results, ocr_texts
+    return results, raw_content
 
 
 def embed_text(text: str) -> List[float]:
