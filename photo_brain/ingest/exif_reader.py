@@ -84,7 +84,8 @@ def read_exif(path: str | Path) -> ExifData:
             camera_make = str(exif.get(MAKE_TAG) or "").strip() or None
             camera_model = str(exif.get(MODEL_TAG) or "").strip() or None
             software = str(exif.get(SOFTWARE_TAG) or "").strip() or None
-            lens_model = str(exif.get(LENS_MODEL_TAG) or "").strip() or None
+            lens_raw = str(exif.get(LENS_MODEL_TAG) or "").strip() or None
+            lens_model = lens_raw.lower() if lens_raw else None
 
             exposure_time_val = _to_float(exif.get(EXPOSURE_TIME_TAG))
             if exposure_time_val is not None:

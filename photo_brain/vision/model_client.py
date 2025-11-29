@@ -107,6 +107,8 @@ def _normalize_label(label: str) -> Optional[str]:
     # Enforce concise labels (max 4 words) to avoid sentences.
     if len(words) == 0 or len(words) > 4:
         return None
+    if prefix and len(words) > 2:
+        return None
     # Require majority alphabetic characters.
     alpha = sum(ch.isalpha() for ch in value)
     if alpha < 2 or alpha < len(value) * 0.5:
