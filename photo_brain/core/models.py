@@ -55,7 +55,6 @@ class VisionDescription(BaseModel):
     photo_id: str
     description: str
     model: Optional[str] = None
-    confidence: Optional[float] = None
     user_context: Optional[str] = None
     created_at: Optional[datetime] = None
 
@@ -65,6 +64,35 @@ class Classification(BaseModel):
     label: str
     score: float
     source: str = "classifier"
+    created_at: Optional[datetime] = None
+
+
+class CropBox(BaseModel):
+    """Normalized crop rectangle anchored to the original image frame."""
+
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+class FocalPoint(BaseModel):
+    """Normalized focal point within the original image frame."""
+
+    x: float
+    y: float
+
+
+class SmartCrop(BaseModel):
+    """Vision-driven crop + focal metadata shared across views."""
+
+    photo_id: str
+    subject_type: str = "unknown"  # photo_people | photo_object | photo_scene | document_like | screenshot | unknown
+    render_mode: str = "cover"  # cover | contain
+    primary_crop: CropBox
+    focal_point: FocalPoint
+    type_label: Optional[str] = None
+    summary: Optional[str] = None
     created_at: Optional[datetime] = None
 
 
@@ -90,8 +118,20 @@ class Person(BaseModel):
     id: str
     display_name: str
     face_count: int = 0
+    is_user_confirmed: bool = False
+    auto_assign_enabled: bool = True
+    status: str = "active"
     sample_photo_id: Optional[str] = None
     created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PersonStats(BaseModel):
+    person_id: str
+    embedding_centroid: Optional[list[float]] = None
+    embedding_count: int = 0
+    cluster_spread: Optional[float] = None
+    last_seen_at: Optional[datetime] = None
 
 
 class FacePreview(BaseModel):
@@ -106,6 +146,7 @@ class FaceGroupProposal(BaseModel):
     id: str
     status: str = "pending"
     suggested_label: Optional[str] = None
+    suggested_person_id: Optional[str] = None
     score_min: Optional[float] = None
     score_max: Optional[float] = None
     score_mean: Optional[float] = None
@@ -127,6 +168,7 @@ class PhotoRecord(BaseModel):
     exif: Optional[ExifData] = None
     vision: Optional[VisionDescription] = None
     classifications: list[Classification] = Field(default_factory=list)
+    smart_crop: Optional[SmartCrop] = None
     embedding: Optional[TextEmbedding] = None
     detections: list[FaceDetection] = Field(default_factory=list)
     faces: list[FaceIdentity] = Field(default_factory=list)

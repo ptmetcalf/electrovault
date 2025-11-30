@@ -48,7 +48,6 @@ def test_init_db_and_basic_crud() -> None:
                 photo_id=photo.id,
                 description="a test scene",
                 model="mock",
-                confidence=0.9,
             )
         )
         session.add(

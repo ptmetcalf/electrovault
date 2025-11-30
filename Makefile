@@ -2,7 +2,7 @@ VENV ?= .venv
 PYTHON ?= $(VENV)/bin/python
 PIP ?= $(VENV)/bin/pip
 
-.PHONY: help venv deps install lint format test test-cov coverage api frontend-install frontend-dev frontend-build ingest-sample dev
+.PHONY: help venv venv-shell deps install lint format test test-cov coverage api frontend-install frontend-dev frontend-build ingest-sample dev
 
 help: ## List available make commands
 	@echo "Available make commands:"
@@ -10,6 +10,10 @@ help: ## List available make commands
 
 venv: ## Create virtual environment at $(VENV)
 	python3 -m venv $(VENV)
+
+venv-shell: venv ## Enter an interactive shell with the virtualenv activated
+	@echo "Launching bash with $(VENV) activated (type 'exit' to leave)..."
+	@bash -c "source $(VENV)/bin/activate && exec bash -i"
 
 deps: ## Create venv (if needed) and install Python requirements only
 	test -d $(VENV) || python3 -m venv $(VENV)
@@ -37,6 +41,15 @@ coverage: ## Run pytest with coverage summary (missing lines)
 
 api: ## Start FastAPI server on port 8000
 	$(PYTHON) -m uvicorn photo_brain.api.http_api:app --host 0.0.0.0 --port 8000
+
+kill-8000: ## Force kill any process bound to port 8000
+	@pids=$$(lsof -ti:8000); \
+	if [ -n "$$pids" ]; then \
+		echo "Killing process(es) on :8000 -> $$pids"; \
+		kill -9 $$pids; \
+	else \
+		echo "No processes found on port 8000"; \
+	fi
 
 frontend-install: ## Install frontend dependencies
 	cd frontend && npm install

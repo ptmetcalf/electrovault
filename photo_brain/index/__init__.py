@@ -1,6 +1,6 @@
 """Database and vector index layer for Photo Brain."""
 
-from .indexer import index_photo
+from .indexer import caption_photo, index_photo
 from .location import (
     LocationResolverConfig,
     assign_user_location,
@@ -29,11 +29,14 @@ from .schema import (
     FaceIdentityRow,
     FaceGroupProposalRow,
     FaceGroupProposalMemberRow,
+    PersonStatsRow,
     PersonRow,
+    PersonStatsRow,
     LocationLabelRow,
     MemoryEventRow,
     PhotoFileRow,
     PhotoLocationRow,
+    SmartCropRow,
     TextEmbeddingRow,
     VisionDescriptionRow,
     create_engine_from_url,
@@ -56,13 +59,16 @@ __all__ = [
     "FacePersonLinkRow",
     "FaceGroupProposalRow",
     "FaceGroupProposalMemberRow",
+    "PersonStatsRow",
     "PersonRow",
     "LocationLabelRow",
     "MemoryEventRow",
     "PhotoFileRow",
     "PhotoLocationRow",
+    "SmartCropRow",
     "TextEmbeddingRow",
     "VisionDescriptionRow",
+    "caption_photo",
     "build_photo_record",
     "index_photo",
     "list_face_identities",
@@ -74,6 +80,7 @@ __all__ = [
     "rename_person",
     "merge_persons",
     "set_photo_user_context",
+    "PersonStatsRow",
     "rebuild_face_group_proposals",
     "list_face_group_proposals",
     "accept_face_group",

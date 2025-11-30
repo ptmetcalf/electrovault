@@ -10,6 +10,7 @@ from photo_brain.core.models import FaceDetection, PhotoFile
 from photo_brain.faces import detect_faces, recognize_faces
 from photo_brain.index import (
     FaceDetectionRow,
+    PersonRow,
     PhotoFileRow,
     init_db,
     index_photo,
@@ -136,9 +137,76 @@ def test_face_matching_reuses_named_person(tmp_path: Path, monkeypatch) -> None:
         assert det_id is not None
         assign_face_identity(session, detection_id=det_id, person_label="Alice")
         session.commit()
+        # Person should now be confirmed and have stats.
 
         index_photo(session, row2, backend=backend, skip_if_fresh=False, preserve_faces=False)
         record = load_photo_record(session, "p2")
         assert record is not None
         # New behavior: faces remain unassigned until explicitly labeled/grouped.
         assert record.faces == []
+
+
+def test_auto_assign_requires_confirmed(tmp_path: Path, monkeypatch) -> None:
+    image_path1 = tmp_path / "face1.jpg"
+    image_path2 = tmp_path / "face2.jpg"
+    Image.new("RGB", (10, 10), color="white").save(image_path1)
+    Image.new("RGB", (10, 10), color="gray").save(image_path2)
+
+    engine = init_db("sqlite+pysqlite:///:memory:")
+    SessionLocal = session_factory(engine)
+    backend = PgVectorBackend()
+
+    encoding = [0.1, 0.2, 0.3, 0.4]
+
+    def fake_detect(photo: PhotoFile) -> list[FaceDetection]:
+        return [
+            FaceDetection(
+                photo_id=photo.id,
+                bbox=(0.0, 0.0, 5.0, 5.0),
+                confidence=0.9,
+                encoding=list(encoding),
+            )
+        ]
+
+    monkeypatch.setattr(indexer, "detect_faces", fake_detect)
+    monkeypatch.setattr(indexer, "describe_photo", lambda *_, **__: None, raising=False)
+    monkeypatch.setattr(indexer, "classify_photo", lambda *_, **__: [], raising=False)
+    monkeypatch.setattr(indexer, "FACE_ASSIGN_MIN_SAMPLES", 1)
+    monkeypatch.setattr(indexer, "FACE_ASSIGN_THRESHOLD", 0.9)
+
+    with SessionLocal() as session:
+        row1 = PhotoFileRow(
+            id="p1",
+            path=str(image_path1),
+            sha256="a" * 64,
+            size_bytes=image_path1.stat().st_size,
+            mtime=datetime.now(timezone.utc),
+        )
+        row2 = PhotoFileRow(
+            id="p2",
+            path=str(image_path2),
+            sha256="b" * 64,
+            size_bytes=image_path2.stat().st_size,
+            mtime=datetime.now(timezone.utc),
+        )
+        session.add_all([row1, row2])
+        session.commit()
+
+        # Create an unconfirmed person with stats; should NOT auto-assign.
+        person = PersonRow(id="u1", display_name="Unconfirmed", is_user_confirmed=False)
+        session.add(person)
+        session.commit()
+
+        index_photo(session, row1, backend=backend, skip_if_fresh=False, preserve_faces=False)
+        det_id = session.scalar(select(FaceDetectionRow.id).where(FaceDetectionRow.photo_id == "p1"))
+        assert det_id is not None
+        # Manually confirm to make eligible.
+        assign_face_identity(session, detection_id=det_id, person_label="Alice")
+        session.commit()
+
+        index_photo(session, row2, backend=backend, skip_if_fresh=False, preserve_faces=False)
+        record = load_photo_record(session, "p2")
+        assert record is not None
+        # Should auto-assign to confirmed person Alice (matching encoding).
+        assert record.faces
+        assert record.faces[0].label == "Alice"

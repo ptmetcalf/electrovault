@@ -20,7 +20,9 @@ from photo_brain.index import (
     assign_user_location,
     accept_face_group,
     index_photo,
+    caption_photo,
     init_db,
+    PersonRow,
     list_face_group_proposals,
     load_photo_record,
     list_face_previews,
@@ -128,6 +130,16 @@ class FaceGroupRebuildRequest(BaseModel):
 class FaceGroupAcceptRequest(BaseModel):
     target_person_id: str | None = None
     target_label: str | None = None
+
+
+class CaptionRequest(BaseModel):
+    context: str | None = None
+
+
+class CaptionAllRequest(BaseModel):
+    limit: int | None = None
+    offset: int | None = None
+    context: str | None = None
 
 
 @app.get("/faces")
@@ -253,6 +265,42 @@ def reindex_photo(req: ReindexRequest, session: Session = Depends(get_session)) 
     return {"photo": record.model_dump() if record else None}
 
 
+@app.post("/photos/{photo_id}/caption")
+def run_caption_job(
+    photo_id: str, req: CaptionRequest = Body(default_factory=CaptionRequest), session: Session = Depends(get_session)
+) -> dict:
+    row = session.get(PhotoFileRow, photo_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    vision = caption_photo(session, row, context=req.context)
+    record = load_photo_record(session, photo_id)
+    return {
+        "photo": record.model_dump() if record else None,
+        "vision": vision.model_dump() if vision else None,
+    }
+
+
+@app.post("/caption/all")
+def caption_all(
+    req: CaptionAllRequest = Body(default_factory=CaptionAllRequest), session: Session = Depends(get_session)
+) -> dict:
+    query = select(PhotoFileRow).order_by(PhotoFileRow.mtime.desc())
+    if req.offset:
+        query = query.offset(req.offset)
+    if req.limit:
+        query = query.limit(req.limit)
+    rows = session.scalars(query).all()
+    count = 0
+    for row in rows:
+        try:
+            caption_photo(session, row, context=req.context)
+            count += 1
+        except Exception as exc:  # pragma: no cover - defensive log, keep processing others
+            logger.error("Caption all: failed for %s: %s", row.id, exc)
+            session.rollback()
+    return {"processed": count}
+
+
 @app.get("/photos/{photo_id}")
 def get_photo(photo_id: str, session: Session = Depends(get_session)) -> dict:
     record = load_photo_record(session, photo_id)
@@ -301,6 +349,7 @@ def update_context(
     context_value = req.context.strip()
 
     if req.reindex:
+        set_photo_user_context(session, row, context_value)
         index_photo(
             session,
             row,
@@ -413,6 +462,18 @@ def face_crop(
             y1 = int(max(0, min(detection.bbox_y1, height)))
             x2 = int(max(x1 + 1, min(detection.bbox_x2, width)))
             y2 = int(max(y1 + 1, min(detection.bbox_y2, height)))
+            # Zoom out slightly to include context around the face.
+            pad_ratio = float(os.getenv("FACE_CROP_PADDING", "0.15"))
+            w = x2 - x1
+            h = y2 - y1
+            cx = x1 + w / 2
+            cy = y1 + h / 2
+            new_w = w * (1 + pad_ratio)
+            new_h = h * (1 + pad_ratio)
+            x1 = int(max(0, min(width - 1, cx - new_w / 2)))
+            y1 = int(max(0, min(height - 1, cy - new_h / 2)))
+            x2 = int(max(x1 + 1, min(width, cx + new_w / 2)))
+            y2 = int(max(y1 + 1, min(height, cy + new_h / 2)))
             face_img = img.crop((x1, y1, x2, y2))
             face_img.thumbnail((size, size))
             buf = BytesIO()

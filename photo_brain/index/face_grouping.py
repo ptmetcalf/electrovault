@@ -17,12 +17,16 @@ from .schema import (
     FaceGroupProposalRow,
     FacePersonLinkRow,
     PersonRow,
+    PersonStatsRow,
     PhotoFileRow,
 )
 from .updates import set_detection_person, upsert_person
 
 logger = logging.getLogger(__name__)
-DEFAULT_GROUP_THRESHOLD = float(os.getenv("FACE_GROUP_THRESHOLD", "0.85"))
+DEFAULT_GROUP_EPS = float(os.getenv("FACE_GROUP_EPS", os.getenv("FACE_GROUP_THRESHOLD", "0.85")))
+DEFAULT_GROUP_MIN_SAMPLES = int(os.getenv("FACE_GROUP_MIN_SAMPLES", "2"))
+DEFAULT_GROUP_MIN_CONF = float(os.getenv("FACE_GROUP_MIN_CONF", "0.4"))
+DEFAULT_GROUP_MIN_SIZE = int(os.getenv("FACE_GROUP_MIN_SIZE", "8"))
 # By default group unassigned faces only; can be overridden.
 DEFAULT_UNASSIGNED_ONLY = os.getenv("FACE_GROUP_UNASSIGNED_ONLY", "true").lower() in {
     "1",
@@ -44,6 +48,16 @@ def _normalize_vec(vec: list[float] | None) -> Optional[np.ndarray]:
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.clip(np.dot(a, b), -1.0, 1.0))
+
+
+def _is_detection_eligible(det: FaceDetectionRow) -> bool:
+    width = det.bbox_x2 - det.bbox_x1
+    height = det.bbox_y2 - det.bbox_y1
+    if width < DEFAULT_GROUP_MIN_SIZE or height < DEFAULT_GROUP_MIN_SIZE:
+        return False
+    if det.confidence < DEFAULT_GROUP_MIN_CONF:
+        return False
+    return True
 
 
 def _build_photo_model(row: PhotoFileRow) -> PhotoFile:
@@ -93,56 +107,66 @@ def _build_face_preview(
     )
 
 
-def _cluster_encodings(
+def _dbscan_clusters(
     candidates: list[tuple[int, np.ndarray, str | None]],
-    threshold: float,
+    eps: float,
+    min_samples: int,
 ) -> list[tuple[list[int], list[float], list[str | None]]]:
     """
-    Greedy centroid clustering. Returns list of (detection_ids, similarities, labels).
+    Simple DBSCAN-style clustering on cosine similarity.
+    Returns (ids, sims_to_centroid, labels) per cluster.
     """
-    clusters: list[dict[str, object]] = []
-    for detection_id, vec, label in candidates:
-        best_idx = None
-        best_sim = 0.0
-        for idx, cluster in enumerate(clusters):
-            centroid = cluster["centroid"]  # type: ignore[index]
-            sim = _cosine(vec, centroid) if centroid is not None else 0.0
-            if sim > best_sim:
-                best_sim = sim
-                best_idx = idx
-        if best_idx is not None and best_sim >= threshold:
-            cluster = clusters[best_idx]
-            cluster["ids"].append(detection_id)  # type: ignore[index]
-            cluster["sims"].append(best_sim)  # type: ignore[index]
-            cluster["labels"].append(label)  # type: ignore[index]
-            centroid_sum: np.ndarray = cluster["sum"]  # type: ignore[index]
-            centroid_sum += vec
-            new_centroid = _normalize_vec(centroid_sum.tolist())
-            if new_centroid is not None:
-                cluster["centroid"] = new_centroid  # type: ignore[index]
-        else:
-            clusters.append(
-                {
-                    "ids": [detection_id],
-                    "sims": [1.0],
-                    "labels": [label],
-                    "sum": vec.copy(),
-                    "centroid": vec,
-                }
-            )
+    if not candidates or min_samples < 2:
+        return []
+
+    ids = [c[0] for c in candidates]
+    vecs = [c[1] for c in candidates]
+    labels = [c[2] for c in candidates]
+    n = len(vecs)
+    visited = [False] * n
+    clusters: list[list[int]] = []
+
+    # Precompute similarity matrix
+    sim_matrix = np.clip(np.matmul(np.stack(vecs), np.stack(vecs).T), -1.0, 1.0)
+
+    def neighbors(idx: int) -> list[int]:
+        return [j for j, score in enumerate(sim_matrix[idx]) if score >= eps]
+
+    for idx in range(n):
+        if visited[idx]:
+            continue
+        visited[idx] = True
+        nbrs = neighbors(idx)
+        if len(nbrs) < min_samples:
+            continue  # noise
+        cluster = []
+        queue = nbrs.copy()
+        while queue:
+            j = queue.pop()
+            if not visited[j]:
+                visited[j] = True
+                j_neighbors = neighbors(j)
+                if len(j_neighbors) >= min_samples:
+                    queue.extend(j_neighbors)
+            if j not in cluster:
+                cluster.append(j)
+        if cluster:
+            clusters.append(cluster)
 
     results: list[tuple[list[int], list[float], list[str | None]]] = []
-    for cluster in clusters:
-        ids: list[int] = cluster["ids"]  # type: ignore[assignment]
-        if len(ids) < 2:
+    for cluster_indices in clusters:
+        det_ids = [ids[i] for i in cluster_indices]
+        if len(det_ids) < 2:
             continue
-        results.append(
-            (
-                ids,
-                cluster["sims"],  # type: ignore[arg-type]
-                cluster["labels"],  # type: ignore[arg-type]
-            )
-        )
+        cluster_vecs = [vecs[i] for i in cluster_indices]
+        centroid = _normalize_vec(np.mean(np.stack(cluster_vecs), axis=0).tolist())
+        sims = []
+        if centroid is not None:
+            sims = [_cosine(vec, centroid) for vec in cluster_vecs]
+        else:
+            sims = [1.0 for _ in cluster_vecs]
+        cluster_labels = [labels[i] for i in cluster_indices]
+        results.append((det_ids, sims, cluster_labels))
     return results
 
 
@@ -154,7 +178,8 @@ def rebuild_face_group_proposals(
     limit: int | None = None,
 ) -> list[FaceGroupProposalRow]:
     """Rebuild face grouping proposals using face encodings."""
-    effective_threshold = threshold or DEFAULT_GROUP_THRESHOLD
+    effective_eps = threshold or DEFAULT_GROUP_EPS
+    min_samples = max(2, DEFAULT_GROUP_MIN_SAMPLES)
     include_unassigned_only = DEFAULT_UNASSIGNED_ONLY if unassigned_only is None else unassigned_only
     max_candidates = limit or MAX_GROUP_BATCH
     stmt = (
@@ -170,22 +195,24 @@ def rebuild_face_group_proposals(
 
     rows = session.execute(stmt).all()
     candidates: list[tuple[int, np.ndarray, str | None]] = []
-    person_labels: dict[int, str] = {}
+    vec_map: dict[int, np.ndarray] = {}
     for det_row, _, link_row, person_row in rows:
+        if not _is_detection_eligible(det_row):
+            continue
         norm = _normalize_vec(det_row.encoding)
         if norm is None:
             continue
         label = person_row.display_name if person_row else link_row.person_id if link_row else None
         candidates.append((det_row.id, norm, label))
-        if label:
-            person_labels[det_row.id] = label
+        vec_map[det_row.id] = norm
 
-    clusters = _cluster_encodings(candidates, effective_threshold)
+    clusters = _dbscan_clusters(candidates, effective_eps, min_samples=min_samples)
     logger.info(
-        "Face grouping: %d candidates clustered into %d proposals (threshold %.2f)",
+        "Face grouping: %d candidates clustered into %d proposals (eps %.2f, min_samples=%d)",
         len(candidates),
         len(clusters),
-        effective_threshold,
+        effective_eps,
+        min_samples,
     )
 
     pending_ids = select(FaceGroupProposalRow.id).where(FaceGroupProposalRow.status != "accepted")
@@ -200,6 +227,22 @@ def rebuild_face_group_proposals(
         return []
     session.flush()
 
+    # Load confirmed person stats for suggestions
+    stats_rows = session.execute(
+        select(PersonStatsRow, PersonRow)
+        .join(PersonRow, PersonRow.id == PersonStatsRow.person_id)
+        .where(
+            PersonRow.is_user_confirmed.is_(True),
+            PersonRow.auto_assign_enabled.is_(True),
+            PersonStatsRow.embedding_centroid.is_not(None),
+        )
+    ).all()
+    stats: list[tuple[str, str, np.ndarray]] = []
+    for stats_row, person_row in stats_rows:
+        norm = _normalize_vec(stats_row.embedding_centroid)
+        if norm is not None:
+            stats.append((person_row.id, person_row.display_name or person_row.id, norm))
+
     created: list[FaceGroupProposalRow] = []
     for ids, sims, labels in clusters:
         label_counter = Counter(lbl for lbl in labels if lbl)
@@ -207,9 +250,37 @@ def rebuild_face_group_proposals(
         score_min = round(min(sims), 3) if sims else None
         score_max = round(max(sims), 3) if sims else None
         score_mean = round(float(np.mean(sims)), 3) if sims else None
+        suggested_person_id = None
+        if stats and ids:
+            # Compute cluster centroid for suggestion matching
+            vecs = [vec_map[i] for i in ids if i in vec_map]
+            if vecs:
+                centroid = np.mean(np.stack(vecs), axis=0)
+                norm = np.linalg.norm(centroid)
+                if norm:
+                    centroid = centroid / norm
+                    best_id = None
+                    best_label = None
+                    best_score = 0.0
+                    second = 0.0
+                    for pid, pname, pvec in stats:
+                        score = float(np.clip(np.dot(centroid, pvec), -1.0, 1.0))
+                        if score > best_score:
+                            second = best_score
+                            best_score = score
+                            best_id = pid
+                            best_label = pname
+                        elif score > second:
+                            second = score
+                    if best_id and best_score >= effective_eps and (best_score - second) >= 0.03:
+                        suggested_person_id = best_id
+                        if not suggested:
+                            suggested = best_label
+
         proposal = FaceGroupProposalRow(
             status="pending",
             suggested_label=suggested,
+            suggested_person_id=suggested_person_id,
             score_min=score_min,
             score_max=score_max,
             score_mean=score_mean,
@@ -287,6 +358,7 @@ def list_face_group_proposals(
                 id=row.id,
                 status=row.status,
                 suggested_label=row.suggested_label,
+                suggested_person_id=row.suggested_person_id,
                 score_min=row.score_min,
                 score_max=row.score_max,
                 score_mean=row.score_mean,

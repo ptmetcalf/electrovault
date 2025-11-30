@@ -17,16 +17,6 @@ from photo_brain.vision.model_client import (
 logger = logging.getLogger(__name__)
 
 
-def _normalize_conf(value: object) -> Optional[float]:
-    try:
-        conf = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not 0 <= conf <= 1:
-        return None
-    return round(min(conf, 0.99), 2)
-
-
 def _normalize_description_text(text: str) -> str:
     """Tighten description formatting for storage."""
     cleaned = " ".join(text.replace("\n", " ").split())
@@ -37,25 +27,17 @@ def _normalize_description_text(text: str) -> str:
 
 
 _VECTOR_CAPTION_PROMPT = """
-You are a vision captioning engine for a photo search system.
+You are a concise vision captioner for a photo search system.
 
-Fill two fields in the response:
-- "description": ONE long, information-dense sentence that includes:
-  • primary subjects (people/animals/objects)
-  • their clothing, appearance, and colors
-  • their actions or poses
-  • spatial relationships between subjects and key objects
-  • important secondary objects
-  • environment and background (location type, notable scenery)
-  • any visible text (or explicitly say "no readable text")
-  • lighting and overall mood (time of day, indoor/outdoor, bright/dim, etc.)
-- "confidence": a number between 0 and 1 representing how confident you are
-  that the description accurately reflects the image.
+Return ONE natural sentence (15-30 words) that reads like a human describing the photo aloud. Include:
+- key subjects (people/objects) and their actions/poses
+- brief clothing/appearance cues and notable colors
+- setting/background and any visible text (or say "no readable text")
+- time/weather/mood if clearly visible
 
 Rules:
-- Use only concrete visible facts; no speculation or story-telling.
-- Do NOT mention camera settings or metadata.
-- The description should be at least 40 words and preferably 60-100 words.
+- Be specific but tight; no filler, no repetition, no speculation.
+- Do NOT mention camera or metadata.
 """.strip()
 
 
@@ -91,7 +73,6 @@ def describe_photo(
         "type": "object",
         "properties": {
             "description": {"type": "string"},
-            "confidence": {"type": "number"},
         },
         "required": ["description"],
         "additionalProperties": True,
@@ -110,7 +91,6 @@ def describe_photo(
 
     if structured and isinstance(structured, dict):
         text = _normalize_description_text(str(structured.get("description") or ""))
-        confidence = _normalize_conf(structured.get("confidence"))
         if text:
             logger.debug(
                 "Vision captioner structured output\nImage: %s\nPrompt:\n%s\nOutput:\n%s",
@@ -122,7 +102,7 @@ def describe_photo(
                 photo_id=photo.id,
                 description=text,
                 model=model_name,
-                confidence=confidence,
+                confidence=None,
                 user_context=context,
             )
 
@@ -139,13 +119,13 @@ def describe_photo(
         raw_text,
     )
 
-    text, confidence = _parse_caption(raw_text)
+    text, _ = _parse_caption(raw_text)
 
     return VisionDescription(
         photo_id=photo.id,
         description=_normalize_description_text(text),
         model=model_name,
-        confidence=confidence,
+        confidence=None,
     )
 
 
@@ -171,17 +151,14 @@ def _parse_caption(raw: str) -> Tuple[str, float]:
         parsed = json.loads(text)
         if isinstance(parsed, dict):
             desc = str(parsed.get("description") or parsed.get("caption") or "").strip()
-            conf = _normalize_conf(parsed.get("confidence"))
             if desc:
-                return desc, conf if conf is not None else 0.8
+                return desc, None
     except json.JSONDecodeError:
         pass
 
     # Try extracting confidence tokens
     match = re.search(r"confidence\s*[:=]\s*([0-9]*\.?[0-9]+)", text, flags=re.IGNORECASE)
-    confidence = None
     if match:
-        confidence = _normalize_conf(match.group(1))
         text = re.sub(
             r"confidence\s*[:=]\s*([0-9]*\.?[0-9]+)", "", text, flags=re.IGNORECASE
         ).strip()
@@ -196,4 +173,4 @@ def _parse_caption(raw: str) -> Tuple[str, float]:
     if not text:
         raise LocalModelError(f"Caption parse failed. Raw output:\n{raw}")
 
-    return text, confidence if confidence is not None else 0.8
+    return text, None

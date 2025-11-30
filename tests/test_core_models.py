@@ -22,7 +22,7 @@ def test_photo_file_model() -> None:
 
 def test_photo_record_models() -> None:
     vision = VisionDescription(
-        photo_id="1", description="A test photo", model="mock", confidence=0.9
+        photo_id="1", description="A test photo", model="mock"
     )
     embedding = TextEmbedding(photo_id="1", model="mock-embedder", vector=[0.1, 0.2], dim=2)
     classification = Classification(photo_id="1", label="outdoor", score=0.8, source="unit")

@@ -78,6 +78,9 @@ class PhotoFileRow(Base):
     location: Mapped[Optional["PhotoLocationRow"]] = relationship(
         back_populates="photo", cascade="all, delete-orphan", uselist=False
     )
+    smart_crop: Mapped[Optional["SmartCropRow"]] = relationship(
+        back_populates="photo", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class ExifDataRow(Base):
@@ -113,13 +116,35 @@ class VisionDescriptionRow(Base):
     )
     description: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[Optional[str]] = mapped_column(String)
-    confidence: Mapped[Optional[float]] = mapped_column(Float)
     user_context: Mapped[Optional[str]] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     photo: Mapped[PhotoFileRow] = relationship(back_populates="vision")
+
+
+class SmartCropRow(Base):
+    __tablename__ = "smart_crops"
+
+    photo_id: Mapped[str] = mapped_column(
+        ForeignKey("photo_files.id", ondelete="CASCADE"), primary_key=True
+    )
+    subject_type: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    render_mode: Mapped[str] = mapped_column(String, nullable=False, default="cover")
+    crop_x: Mapped[float] = mapped_column(Float, nullable=False)
+    crop_y: Mapped[float] = mapped_column(Float, nullable=False)
+    crop_w: Mapped[float] = mapped_column(Float, nullable=False)
+    crop_h: Mapped[float] = mapped_column(Float, nullable=False)
+    focal_x: Mapped[float] = mapped_column(Float, nullable=False)
+    focal_y: Mapped[float] = mapped_column(Float, nullable=False)
+    type_label: Mapped[Optional[str]] = mapped_column(String)
+    summary: Mapped[Optional[str]] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    photo: Mapped[PhotoFileRow] = relationship(back_populates="smart_crop")
 
 
 class ClassificationRow(Base):
@@ -204,8 +229,14 @@ class PersonRow(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
+    is_user_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
+    auto_assign_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("active"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), server_onupdate=func.now()
     )
 
     links: Mapped[list["FacePersonLinkRow"]] = relationship(
@@ -238,6 +269,7 @@ class FaceGroupProposalRow(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     suggested_label: Mapped[Optional[str]] = mapped_column(String)
+    suggested_person_id: Mapped[Optional[str]] = mapped_column(String)
     score_min: Mapped[Optional[float]] = mapped_column(Float)
     score_max: Mapped[Optional[float]] = mapped_column(Float)
     score_mean: Mapped[Optional[float]] = mapped_column(Float)
@@ -288,6 +320,18 @@ class LocationLabelRow(Base):
     photos: Mapped[list["PhotoLocationRow"]] = relationship(
         back_populates="location", cascade="all, delete-orphan"
     )
+
+
+class PersonStatsRow(Base):
+    __tablename__ = "person_stats"
+
+    person_id: Mapped[str] = mapped_column(
+        ForeignKey("persons.id", ondelete="CASCADE"), primary_key=True
+    )
+    embedding_centroid: Mapped[Optional[list[float]]] = mapped_column(JSON)
+    embedding_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cluster_spread: Mapped[Optional[float]] = mapped_column(Float)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class PhotoLocationRow(Base):
@@ -368,6 +412,26 @@ def init_db(database_url: str | Engine) -> Engine:
             conn.commit()
 
     Base.metadata.create_all(engine)
+
+    def _add_column_if_missing(conn: Engine, table: str, name: str, ddl: str) -> None:
+        if engine.dialect.name != "sqlite":
+            return
+        info = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        if not info:
+            return
+        cols = {row[1] for row in info}
+        if name not in cols:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+
+    if engine.dialect.name == "sqlite":
+        with engine.begin() as conn:
+            _add_column_if_missing(conn, "persons", "is_user_confirmed", "BOOLEAN DEFAULT 0")
+            _add_column_if_missing(conn, "persons", "auto_assign_enabled", "BOOLEAN DEFAULT 1")
+            _add_column_if_missing(conn, "persons", "status", "TEXT DEFAULT 'active'")
+            _add_column_if_missing(conn, "persons", "updated_at", "DATETIME")
+            _add_column_if_missing(conn, "face_identities", "auto_assigned", "BOOLEAN DEFAULT 0")
+            _add_column_if_missing(conn, "face_group_proposals", "suggested_person_id", "TEXT")
+
     return engine
 
 

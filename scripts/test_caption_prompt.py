@@ -96,8 +96,6 @@ def main() -> None:
     print(f"Model: {model_name}")
     print("Caption:")
     print(vision_desc.description)
-    if vision_desc.confidence is not None:
-        print(f"Confidence: {vision_desc.confidence:.2f}")
 
 
 if __name__ == "__main__":

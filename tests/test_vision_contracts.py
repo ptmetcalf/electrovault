@@ -37,7 +37,7 @@ def test_captioner_uses_structured(monkeypatch, tmp_path: Path) -> None:
     assert desc is not None
     assert desc.description == "a scene."
     assert desc.model == "mock-vision"
-    assert desc.confidence == 0.7
+    assert not hasattr(desc, "confidence")
 
 
 def test_captioner_falls_back_to_raw(monkeypatch, tmp_path: Path) -> None:
@@ -81,7 +81,7 @@ def test_classifier_embedding_fallback(monkeypatch, tmp_path: Path) -> None:
             photo_id=photo.id,
             description="a playful dog in a park",
             model="mock-vision",
-            confidence=0.8,
+            confidence=None,
         )
 
     def fake_embed(

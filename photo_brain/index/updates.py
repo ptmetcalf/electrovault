@@ -11,6 +11,7 @@ from photo_brain.index.schema import (
     FacePersonLinkRow,
     FaceIdentityRow,
     PersonRow,
+    PersonStatsRow,
     PhotoFileRow,
     VisionDescriptionRow,
 )
@@ -75,6 +76,7 @@ def set_detection_person(
             detection_id=detection_id,
             person_label=person.display_name,
             confidence=confidence,
+            auto_assigned=False,
         )
         session.add(identity)
 
@@ -86,6 +88,11 @@ def set_detection_person(
         link.person_id = person.id
     else:
         session.add(FacePersonLinkRow(detection_id=detection_id, person_id=person.id))
+
+    # Mark person as confirmed on manual assignment.
+    person.is_user_confirmed = True
+    person.updated_at = func.now()
+    update_person_stats(session, person.id)
 
     if old_person_id and old_person_id != person.id:
         remaining = session.scalar(
@@ -159,6 +166,11 @@ def merge_persons(session: Session, source_id: str, target_id: str) -> PersonRow
         .values(person_label=target.display_name)
     )
     session.flush()
+    # Refresh stats.
+    update_person_stats(session, target.id)
+    source_stats = session.get(PersonStatsRow, source_id)
+    if source_stats:
+        session.delete(source_stats)
     session.delete(source)
     session.flush()
     return target
@@ -176,9 +188,54 @@ def set_photo_user_context(
             photo_id=photo_row.id,
             description="",
             model=None,
-            confidence=None,
             user_context=context,
         )
         session.add(vision)
     session.flush()
     return vision
+
+
+def update_person_stats(session: Session, person_id: str) -> PersonStatsRow:
+    """Recompute centroid and stats for a person based on linked detections."""
+    vecs: list[list[float]] = []
+    last_seen = None
+    detections = session.execute(
+        select(FaceDetectionRow)
+        .join(FacePersonLinkRow, FacePersonLinkRow.detection_id == FaceDetectionRow.id)
+        .where(FacePersonLinkRow.person_id == person_id, FaceDetectionRow.encoding.is_not(None))
+    ).scalars()
+    for det in detections:
+        if det.encoding:
+            vecs.append(det.encoding)
+        if last_seen is None or (det.created_at and det.created_at > last_seen):
+            last_seen = det.created_at
+    centroid = None
+    spread = None
+    if vecs:
+        import numpy as np
+
+        arr = np.array(vecs, dtype=float)
+        mean_vec = np.mean(arr, axis=0)
+        norm = np.linalg.norm(mean_vec)
+        centroid = (mean_vec / norm).tolist() if norm else mean_vec.tolist()
+        # Mean distance from centroid as simple spread.
+        if norm:
+            spread = float(np.mean(np.linalg.norm(arr - mean_vec, axis=1)))
+
+    stats = session.get(PersonStatsRow, person_id)
+    if stats:
+        stats.embedding_centroid = centroid
+        stats.embedding_count = len(vecs)
+        stats.last_seen_at = last_seen
+        stats.cluster_spread = spread
+    else:
+        stats = PersonStatsRow(
+            person_id=person_id,
+            embedding_centroid=centroid,
+            embedding_count=len(vecs),
+            last_seen_at=last_seen,
+            cluster_spread=spread,
+        )
+        session.add(stats)
+    session.flush()
+    return stats

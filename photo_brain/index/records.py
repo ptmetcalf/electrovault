@@ -7,10 +7,12 @@ from sqlalchemy.orm import Session
 
 from photo_brain.core.models import (
     Classification,
+    CropBox,
     ExifData,
     FaceDetection,
     FaceIdentity,
     FacePreview,
+    FocalPoint,
     LocationLabel,
     Person,
     PhotoFile,
@@ -18,6 +20,7 @@ from photo_brain.core.models import (
     PhotoRecord,
     TextEmbedding,
     VisionDescription,
+    SmartCrop,
 )
 
 from .schema import (
@@ -28,8 +31,10 @@ from .schema import (
     FaceIdentityRow,
     LocationLabelRow,
     PersonRow,
+    PersonStatsRow,
     PhotoFileRow,
     PhotoLocationRow,
+    SmartCropRow,
     TextEmbeddingRow,
     VisionDescriptionRow,
     event_photos,
@@ -65,6 +70,21 @@ def _load_location(row: PhotoLocationRow | None) -> PhotoLocation | None:
         location=label,
         method=row.method,
         confidence=row.confidence,
+        created_at=row.created_at,
+    )
+
+
+def _load_smart_crop(row: SmartCropRow | None) -> SmartCrop | None:
+    if row is None:
+        return None
+    return SmartCrop(
+        photo_id=row.photo_id,
+        subject_type=row.subject_type,
+        render_mode=row.render_mode,
+        primary_crop=CropBox(x=row.crop_x, y=row.crop_y, w=row.crop_w, h=row.crop_h),
+        focal_point=FocalPoint(x=row.focal_x, y=row.focal_y),
+        type_label=row.type_label,
+        summary=row.summary,
         created_at=row.created_at,
     )
 
@@ -212,6 +232,7 @@ def build_photo_record(
     exif = _load_exif(photo_row.exif)
     location_row = session.get(PhotoLocationRow, photo_row.id)
     location = _load_location(location_row)
+    smart_crop = _load_smart_crop(photo_row.smart_crop)
 
     vision_row = session.scalar(
         select(VisionDescriptionRow).where(VisionDescriptionRow.photo_id == photo_row.id)
@@ -222,7 +243,6 @@ def build_photo_record(
             photo_id=photo_row.id,
             description=vision_row.description,
             model=vision_row.model,
-            confidence=vision_row.confidence,
             user_context=vision_row.user_context,
             created_at=vision_row.created_at,
         )
@@ -285,6 +305,7 @@ def build_photo_record(
         exif=exif,
         vision=vision,
         classifications=classifications,
+        smart_crop=smart_crop,
         embedding=embedding,
         detections=detections,
         faces=faces,
@@ -341,8 +362,12 @@ def list_persons(
                 id=person_row.id,
                 display_name=person_row.display_name,
                 face_count=int(face_count or 0),
+                is_user_confirmed=bool(person_row.is_user_confirmed),
+                auto_assign_enabled=bool(person_row.auto_assign_enabled),
+                status=person_row.status,
                 sample_photo_id=sample_photo_id,
                 created_at=person_row.created_at,
+                updated_at=getattr(person_row, "updated_at", None),
             )
         )
     return people, total
