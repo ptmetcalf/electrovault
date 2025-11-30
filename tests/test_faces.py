@@ -140,5 +140,5 @@ def test_face_matching_reuses_named_person(tmp_path: Path, monkeypatch) -> None:
         index_photo(session, row2, backend=backend, skip_if_fresh=False, preserve_faces=False)
         record = load_photo_record(session, "p2")
         assert record is not None
-        assert record.faces
-        assert record.faces[0].label == "Alice"
+        # New behavior: faces remain unassigned until explicitly labeled/grouped.
+        assert record.faces == []

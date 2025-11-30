@@ -2,7 +2,7 @@ VENV ?= .venv
 PYTHON ?= $(VENV)/bin/python
 PIP ?= $(VENV)/bin/pip
 
-.PHONY: help venv install lint format test test-cov api frontend-install frontend-dev frontend-build ingest-sample dev
+.PHONY: help venv deps install lint format test test-cov coverage api frontend-install frontend-dev frontend-build ingest-sample dev
 
 help: ## List available make commands
 	@echo "Available make commands:"
@@ -11,15 +11,12 @@ help: ## List available make commands
 venv: ## Create virtual environment at $(VENV)
 	python3 -m venv $(VENV)
 
-deps: ## Create venv (if needed) and install Python requirements
+deps: ## Create venv (if needed) and install Python requirements only
 	test -d $(VENV) || python3 -m venv $(VENV)
 	$(PIP) install --upgrade pip
 	$(PIP) install -e ".[dev]"
 
-install: venv ## Install Python deps and frontend deps
-	$(PIP) install --upgrade pip
-	$(PIP) install -e ".[dev]"
-	cd frontend && npm install
+install: deps frontend-install ## Install Python + frontend deps (full setup)
 
 lint: ## Run Python (ruff) and frontend (eslint) linters
 	$(VENV)/bin/ruff check .
@@ -34,6 +31,9 @@ test: ## Run pytest
 
 test-cov: ## Run pytest with coverage report
 	$(VENV)/bin/pytest --cov=photo_brain --cov-report=term
+
+coverage: ## Run pytest with coverage summary (missing lines)
+	$(VENV)/bin/pytest --cov=photo_brain --cov-report=term-missing
 
 api: ## Start FastAPI server on port 8000
 	$(PYTHON) -m uvicorn photo_brain.api.http_api:app --host 0.0.0.0 --port 8000

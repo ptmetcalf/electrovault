@@ -7,6 +7,12 @@ from .location import (
     resolve_photo_location,
     upsert_user_location,
 )
+from .face_grouping import (
+    accept_face_group,
+    list_face_group_proposals,
+    rebuild_face_group_proposals,
+    reject_face_group,
+)
 from .records import (
     build_photo_record,
     list_face_identities,
@@ -21,6 +27,8 @@ from .schema import (
     FaceDetectionRow,
     FacePersonLinkRow,
     FaceIdentityRow,
+    FaceGroupProposalRow,
+    FaceGroupProposalMemberRow,
     PersonRow,
     LocationLabelRow,
     MemoryEventRow,
@@ -46,6 +54,8 @@ __all__ = [
     "FaceDetectionRow",
     "FaceIdentityRow",
     "FacePersonLinkRow",
+    "FaceGroupProposalRow",
+    "FaceGroupProposalMemberRow",
     "PersonRow",
     "LocationLabelRow",
     "MemoryEventRow",
@@ -64,6 +74,10 @@ __all__ = [
     "rename_person",
     "merge_persons",
     "set_photo_user_context",
+    "rebuild_face_group_proposals",
+    "list_face_group_proposals",
+    "accept_face_group",
+    "reject_face_group",
     "PgVectorBackend",
     "LocationResolverConfig",
     "upsert_user_location",

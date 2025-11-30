@@ -17,7 +17,7 @@ from photo_brain.core.models import (
     VisionDescription,
 )
 from photo_brain.embedding import embed_description
-from photo_brain.faces import detect_faces, recognize_faces
+from photo_brain.faces import detect_faces
 from photo_brain.index.records import list_face_identities
 from photo_brain.vision import classify_photo, describe_photo
 
@@ -32,11 +32,13 @@ from .schema import (
     PhotoFileRow,
     VisionDescriptionRow,
 )
-from .updates import set_detection_person, upsert_person
+from .updates import upsert_person
 from .vector_backend import PgVectorBackend
 
 logger = logging.getLogger(__name__)
 FACE_MATCH_THRESHOLD = float(os.getenv("FACE_MATCH_THRESHOLD", "0.75"))
+FACE_ASSIGN_THRESHOLD = float(os.getenv("FACE_ASSIGN_THRESHOLD", "0.9"))
+FACE_ASSIGN_MIN_SAMPLES = int(os.getenv("FACE_ASSIGN_MIN_SAMPLES", "2"))
 
 
 def _build_photo_model(row: PhotoFileRow) -> PhotoFile:
@@ -284,10 +286,7 @@ def index_photo(
         session.execute(delete(FaceDetectionRow).where(FaceDetectionRow.photo_id == photo_row.id))
         logger.info("Index: detecting faces for photo %s", photo_row.id)
         detections = detect_faces(photo_model)
-        centroids = _load_person_centroids(session)
-        matches = _match_detections_to_persons(detections, centroids)
-        identities = recognize_faces(detections)
-        for idx, detection in enumerate(detections):
+        for detection in detections:
             det_row = FaceDetectionRow(
                 photo_id=photo_row.id,
                 bbox_x1=detection.bbox[0],
@@ -299,21 +298,54 @@ def index_photo(
             )
             session.add(det_row)
             session.flush()
-            identity = matches.get(idx) or (identities[idx] if idx < len(identities) else None)
-            if identity:
-                display_name = identity.label or identity.person_id or "unknown"
-                person = upsert_person(
-                    session,
-                    display_name=display_name,
-                    person_id=identity.person_id,
-                )
-                set_detection_person(
-                    session,
-                    detection_id=det_row.id,
-                    person=person,
-                    confidence=identity.confidence,
-                )
         session.flush()
+
+    if detections:
+        # Auto-assign only to existing named persons with enough samples and high confidence.
+        centroids = _load_person_centroids(session)
+        eligible = {
+            pid: (vec, label)
+            for pid, (vec, label) in centroids.items()
+            if session.scalar(
+                select(func.count()).select_from(FacePersonLinkRow).where(FacePersonLinkRow.person_id == pid)
+            )
+            >= FACE_ASSIGN_MIN_SAMPLES
+        }
+        if eligible:
+            matches = _match_detections_to_persons(detections, eligible)
+            for idx, detection in enumerate(detections):
+                match = matches.get(idx)
+                if not match or match.confidence is None or match.confidence < FACE_ASSIGN_THRESHOLD:
+                    continue
+                # Persist assignment to existing person only.
+                person = session.get(PersonRow, match.person_id)
+                if not person:
+                    person = upsert_person(session, display_name=match.label or match.person_id or "person")
+                det_id = detection_rows[idx].id if idx < len(detections) and detection.id else detection.id
+                if det_id is None and idx < len(detections):
+                    # Fetch freshly inserted detection row.
+                    det_row = session.scalar(
+                        select(FaceDetectionRow.id)
+                        .where(FaceDetectionRow.photo_id == photo_row.id)
+                        .order_by(FaceDetectionRow.created_at.desc())
+                        .offset(idx)
+                    )
+                    det_id = det_row
+                if det_id is not None:
+                    session.add(
+                        FaceIdentityRow(
+                            detection_id=det_id,
+                            person_label=person.display_name,
+                            confidence=match.confidence,
+                            auto_assigned=True,
+                        )
+                    )
+                    session.add(
+                        FacePersonLinkRow(
+                            detection_id=det_id,
+                            person_id=person.id,
+                        )
+                    )
 
     embedding = None
     if vision:

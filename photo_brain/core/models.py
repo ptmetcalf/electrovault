@@ -82,6 +82,7 @@ class FaceIdentity(BaseModel):
     detection_id: Optional[int] = None
     label: Optional[str] = None
     confidence: Optional[float] = None
+    auto_assigned: bool = False
     created_at: Optional[datetime] = None
 
 
@@ -99,6 +100,18 @@ class FacePreview(BaseModel):
     detection: FaceDetection
     identity: Optional[FaceIdentity] = None
     photo: PhotoFile
+
+
+class FaceGroupProposal(BaseModel):
+    id: str
+    status: str = "pending"
+    suggested_label: Optional[str] = None
+    score_min: Optional[float] = None
+    score_max: Optional[float] = None
+    score_mean: Optional[float] = None
+    size: int
+    members: list[FacePreview] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
 
 
 class TextEmbedding(BaseModel):

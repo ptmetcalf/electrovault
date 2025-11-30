@@ -12,6 +12,7 @@ type Face = {
   person_id?: string;
   label?: string;
   confidence?: number;
+  auto_assigned?: boolean;
 };
 
 type Vision = {
@@ -57,7 +58,19 @@ type Person = {
   sample_photo_id?: string | null;
 };
 
-type Mode = "search" | "browse" | "faces";
+type FaceGroupProposal = {
+  id: string;
+  status: string;
+  suggested_label?: string | null;
+  score_min?: number | null;
+  score_max?: number | null;
+  score_mean?: number | null;
+  size: number;
+  members: FacePreview[];
+  created_at?: string | null;
+};
+
+type Mode = "search" | "gallery" | "faces" | "events" | "admin";
 
 const API_BASE = "";
 const formatScore = (score: number) => score.toFixed(3);
@@ -102,9 +115,22 @@ export default function App() {
   const [mergeStatus, setMergeStatus] = useState<string | null>(null);
   const [mergeError, setMergeError] = useState<string | null>(null);
   const [merging, setMerging] = useState(false);
+  const [faceGroups, setFaceGroups] = useState<FaceGroupProposal[]>([]);
+  const [faceGroupLabelDrafts, setFaceGroupLabelDrafts] = useState<Record<string, string>>({});
+  const [faceGroupLoading, setFaceGroupLoading] = useState(false);
+  const [faceGroupError, setFaceGroupError] = useState<string | null>(null);
+  const [savingGroupId, setSavingGroupId] = useState<string | null>(null);
+
+  const navItems: { id: Mode; label: string; description: string }[] = [
+    { id: "search", label: "Search", description: "Semantic search & filters" },
+    { id: "gallery", label: "Gallery", description: "Browse the full library" },
+    { id: "faces", label: "Faces", description: "Assign, review, and merge people" },
+    { id: "events", label: "Events", description: "Timelines and event queries" },
+    { id: "admin", label: "Admin", description: "Reindexing and maintenance" },
+  ];
 
   const cards = useMemo(() => {
-    if (mode === "browse") {
+    if (mode === "gallery") {
       return browseRecords.map((rec) => ({ record: rec, score: null as number | null }));
     }
     if (mode === "faces") {
@@ -114,7 +140,7 @@ export default function App() {
   }, [mode, browseRecords, results]);
 
   const labelBadges = useMemo(() => {
-    const source = mode === "browse" ? browseRecords : results.map((r) => r.record);
+    const source = mode === "gallery" ? browseRecords : results.map((r) => r.record);
     return source.flatMap((r) => r.classifications.map((c) => c.label));
   }, [mode, browseRecords, results]);
 
@@ -142,6 +168,69 @@ export default function App() {
       })),
     [persons]
   );
+
+  function handleNav(next: Mode) {
+    setMode(next);
+    if (next === "gallery") {
+      browse(0);
+    } else if (next === "faces") {
+      loadFaces(0);
+      loadPersons();
+      loadFaceGroups();
+    } else if (next === "events") {
+      fetchEvents();
+      setSelectedPhoto(null);
+    } else if (next === "search") {
+      setSelectedPhoto(null);
+    } else if (next === "admin") {
+      setSelectedPhoto(null);
+    }
+  }
+
+  function resetUI() {
+    setQuery("");
+    setResults([]);
+    setBrowseRecords([]);
+    setBrowseTotal(0);
+    setBrowsePage(0);
+    setBrowseLoading(false);
+    setEvents([]);
+    setLoading(false);
+    setError(null);
+    setSelectedLabels(new Set());
+    setSelectedPhoto(null);
+    setSelectedScore(null);
+    setPhotoLoading(false);
+    setSelectedError(null);
+    setFaceEdits({});
+    setContextDraft("");
+    setImageSize(null);
+    setHoverDetectionId(null);
+    setMaintenanceStatus(null);
+    setMaintenanceError(null);
+    setPreserveFaces(true);
+    setFaceItems([]);
+    setFaceTotal(0);
+    setFacePage(0);
+    setFaceLoading(false);
+    setFaceFilterPerson("");
+    setFaceUnassignedOnly(true);
+    setFaceLabelDrafts({});
+    setSavingFaceId(null);
+    setFaceError(null);
+    setPersons([]);
+    setMergeSourcePerson("");
+    setMergeTargetPerson("");
+    setMergeStatus(null);
+    setMergeError(null);
+    setMerging(false);
+    setFaceGroups([]);
+    setFaceGroupLabelDrafts({});
+    setFaceGroupError(null);
+    setFaceGroupLoading(false);
+    setSavingGroupId(null);
+    setMode("search");
+  }
 
   function updateResultRecord(next: PhotoRecord) {
     setResults((prev) =>
@@ -216,7 +305,8 @@ export default function App() {
   async function assignFaceLabel(
     photoId: string,
     detectionId: number,
-    value: string
+    value: string,
+    opts: { reindex?: boolean } = {}
   ): Promise<PhotoRecord | null> {
     const res = await fetch(`${API_BASE}/photos/${photoId}/faces`, {
       method: "POST",
@@ -224,7 +314,7 @@ export default function App() {
       body: JSON.stringify({
         detection_id: detectionId,
         person_label: value,
-        reindex: true,
+        reindex: opts.reindex ?? false,
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -246,7 +336,25 @@ export default function App() {
       if (updated) {
         hydrateSelection(updated, selectedScore ?? undefined);
         updateResultRecord(updated);
+        setFaceItems((prev) =>
+          prev.map((item) =>
+            item.detection.id === detectionId
+              ? {
+                  ...item,
+                  identity: {
+                    detection_id: detectionId,
+                    person_id: value,
+                    label: value,
+                  },
+                }
+              : item
+          )
+        );
       }
+      if (mode === "faces") {
+        await loadFaces(facePage);
+      }
+      await loadPersons();
     } catch (err) {
       console.error(err);
       setSelectedError("Updating face label failed");
@@ -288,6 +396,7 @@ export default function App() {
       if (faceUnassignedOnly) {
         await loadFaces(facePage);
       }
+      await loadPersons();
     } catch (err) {
       console.error(err);
       setFaceError("Saving face name failed");
@@ -332,7 +441,7 @@ export default function App() {
   }
 
   async function browse(page: number) {
-    setMode("browse");
+    setMode("gallery");
     setBrowseLoading(true);
     setError(null);
     setSelectedPhoto(null);
@@ -403,6 +512,86 @@ export default function App() {
       setFaceError("Loading faces failed");
     } finally {
       setFaceLoading(false);
+    }
+  }
+
+  async function loadFaceGroups() {
+    setFaceGroupLoading(true);
+    setFaceGroupError(null);
+    try {
+      const res = await fetch(`${API_BASE}/face_groups?status=pending&limit=50`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const proposals: FaceGroupProposal[] = data.proposals || [];
+      setFaceGroups(proposals);
+      const drafts: Record<string, string> = {};
+      proposals.forEach((p) => {
+        drafts[p.id] = p.suggested_label || "";
+      });
+      setFaceGroupLabelDrafts(drafts);
+    } catch (err) {
+      console.error(err);
+      setFaceGroupError("Loading suggestions failed");
+    } finally {
+      setFaceGroupLoading(false);
+    }
+  }
+
+  async function rebuildFaceGroups() {
+    setFaceGroupLoading(true);
+    setFaceGroupError(null);
+    setMaintenanceStatus("Rebuilding face suggestions...");
+    try {
+      const res = await fetch(`${API_BASE}/face_groups/rebuild`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unassigned_only: true }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await loadFaceGroups();
+      setMaintenanceStatus("Face suggestions rebuilt");
+    } catch (err) {
+      console.error(err);
+      setFaceGroupError("Rebuilding suggestions failed");
+      setFaceGroupLoading(false);
+      setMaintenanceStatus(null);
+    }
+  }
+
+  async function acceptFaceGroup(proposal: FaceGroupProposal) {
+    const label = faceGroupLabelDrafts[proposal.id]?.trim();
+    setSavingGroupId(proposal.id);
+    setFaceGroupError(null);
+    try {
+      const res = await fetch(`${API_BASE}/face_groups/${proposal.id}/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_label: label || proposal.suggested_label || undefined }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await loadPersons();
+      await loadFaceGroups();
+      await loadFaces(facePage);
+    } catch (err) {
+      console.error(err);
+      setFaceGroupError("Accepting group failed");
+    } finally {
+      setSavingGroupId(null);
+    }
+  }
+
+  async function rejectFaceGroup(proposal: FaceGroupProposal) {
+    setSavingGroupId(proposal.id);
+    setFaceGroupError(null);
+    try {
+      const res = await fetch(`${API_BASE}/face_groups/${proposal.id}/reject`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await loadFaceGroups();
+    } catch (err) {
+      console.error(err);
+      setFaceGroupError("Rejecting group failed");
+    } finally {
+      setSavingGroupId(null);
     }
   }
 
@@ -497,335 +686,582 @@ export default function App() {
     fetchEvents();
   }, []);
 
+  const primaryCount =
+    mode === "gallery"
+      ? browseTotal
+      : mode === "faces"
+      ? faceTotal
+      : mode === "events"
+      ? events.length
+      : results.length;
+  const primaryLabel =
+    mode === "faces" ? "Faces" : mode === "gallery" ? "Photos" : mode === "events" ? "Events" : "Results";
+  const pageHeadline: Record<Mode, string> = {
+    search: "Search across your photos",
+    gallery: "Browse the full gallery",
+    faces: "Review and name faces",
+    events: "Explore events and timelines",
+    admin: "Operate and maintain the index",
+  };
+  const pageSubline: Record<Mode, string> = {
+    search: "Natural language, filters, and quick opens",
+    gallery: "Paginate through everything with quick labels",
+    faces: "Assign identities, merge duplicates, and open source photos",
+    events: "Kick off event-focused queries",
+    admin: "Run reindex jobs and check health",
+  };
+
+  const detailPanel = selectedPhoto ? (
+    <div className="detail">
+      <div className="detail-head">
+        <div>
+          <div className="muted">Selected photo</div>
+          <div className="row wrap">
+            <strong className="truncate">
+              {selectedPhoto.file.path.split("/").pop() || selectedPhoto.file.path}
+            </strong>
+            {selectedScore != null && <span className="pill small">Score {formatScore(selectedScore)}</span>}
+          </div>
+        </div>
+        <div className="row">
+          <button type="button" className="secondary" onClick={() => setSelectedPhoto(null)}>
+            Close
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => openPhoto(selectedPhoto, selectedScore ?? undefined)}
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+      <div className="detail-body">
+        <div className="image-frame">
+          <img
+            src={selectedFullImage || selectedThumbImage || ""}
+            alt="Selected"
+            onLoad={(evt) => {
+              setImageSize({
+                width: evt.currentTarget.naturalWidth,
+                height: evt.currentTarget.naturalHeight,
+              });
+            }}
+            onError={(evt) => {
+              if (selectedThumbImage && evt.currentTarget.src !== selectedThumbImage) {
+                evt.currentTarget.src = selectedThumbImage;
+              }
+            }}
+          />
+          {imageSize &&
+            (selectedPhoto.detections || [])
+              .filter((det) => det.id != null)
+              .map((det) => {
+                if (!det.id || !imageSize.width || !imageSize.height) return null;
+                const [x1, y1, x2, y2] = det.bbox;
+                if (x2 <= x1 || y2 <= y1) return null;
+                const left = (x1 / imageSize.width) * 100;
+                const top = (y1 / imageSize.height) * 100;
+                const width = ((x2 - x1) / imageSize.width) * 100;
+                const height = ((y2 - y1) / imageSize.height) * 100;
+                const label =
+                  faceEdits[det.id] ||
+                  facesByDetection.get(det.id)?.person_id ||
+                  facesByDetection.get(det.id)?.label ||
+                  `Face ${det.id}`;
+                return (
+                  <div
+                    key={det.id}
+                    className={`face-box ${hoverDetectionId === det.id ? "active" : ""}`}
+                    style={{
+                      left: `${left}%`,
+                      top: `${top}%`,
+                      width: `${width}%`,
+                      height: `${height}%`,
+                    }}
+                  >
+                    <span className="face-label">{label}</span>
+                  </div>
+                );
+              })}
+        </div>
+        <div className="detail-meta">
+          <div className="stack">
+            <div>
+              <div className="muted small">Caption</div>
+              <div className="meta">{selectedPhoto.vision?.description || "No caption yet"}</div>
+            </div>
+            <div className="stack">
+              <div className="muted small">User context</div>
+              <textarea
+                value={contextDraft}
+                rows={3}
+                onChange={(e) => setContextDraft(e.target.value)}
+                placeholder="Add reminders, places, or who is in the scene"
+              />
+              <div className="row">
+                <button type="button" onClick={saveContext} disabled={photoLoading}>
+                  {photoLoading ? "Saving..." : "Save context & reindex"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setContextDraft(selectedPhoto.vision?.user_context || "")}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+            <div className="stack">
+              <div className="muted small">Faces</div>
+              {(selectedPhoto.detections || []).length === 0 && (
+                <div className="muted">No face detections yet.</div>
+              )}
+              {(selectedPhoto.detections || []).map((det) => {
+                const face = det.id ? facesByDetection.get(det.id) : undefined;
+                const value = det.id ? faceEdits[det.id] ?? face?.person_id ?? face?.label ?? "" : "";
+                return (
+                  <div
+                    key={det.id || `${det.bbox[0]}-${det.bbox[1]}`}
+                    className="face-row"
+                    onMouseEnter={() => det.id && setHoverDetectionId(det.id)}
+                    onMouseLeave={() => setHoverDetectionId(null)}
+                  >
+                    <div className="muted">ID {det.id ?? "?"}</div>
+                    <input
+                      type="text"
+                      value={value}
+                      onChange={(e) => {
+                        if (!det.id) return;
+                        setFaceEdits((prev) => ({ ...prev, [det.id!]: e.target.value }));
+                      }}
+                      list="person-options"
+                      placeholder="Name this face"
+                      onFocus={() => det.id && setHoverDetectionId(det.id)}
+                      onBlur={() => setHoverDetectionId(null)}
+                    />
+                    {det.id && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => saveFaceLabel(det.id!)}
+                        disabled={photoLoading}
+                        onMouseEnter={() => setHoverDetectionId(det.id!)}
+                        onMouseLeave={() => setHoverDetectionId(null)}
+                      >
+                        Save name
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <div className="row wrap">
+                <label className="muted small">
+                  <input
+                    type="checkbox"
+                    checked={preserveFaces}
+                    onChange={(e) => setPreserveFaces(e.target.checked)}
+                  />{" "}
+                  Preserve face identities on reindex
+                </label>
+                <button type="button" className="secondary" onClick={reindexSelected} disabled={photoLoading}>
+                  Reindex photo
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {selectedError && <div className="error">{selectedError}</div>}
+    </div>
+  ) : null;
+
+  const filteredCards = cards.filter((item) => {
+    if (!selectedLabels.size) return true;
+    const labels = item.record.classifications.map((c) => c.label);
+    return Array.from(selectedLabels).every((l) => labels.includes(l));
+  });
+
+  const cardsContent = (
+    <>
+      <div className="panel-head">
+        <h3>{mode === "gallery" ? "Gallery" : "Results"}</h3>
+        <div className="row wrap">
+          {Array.from(new Set(labelBadges))
+            .slice(0, 12)
+            .map((l) => {
+              const active = selectedLabels.has(l);
+              return (
+                <span
+                  key={l}
+                  className={`badge ${active ? "active" : ""}`}
+                  onClick={() => {
+                    const next = new Set(selectedLabels);
+                    if (active) {
+                      next.delete(l);
+                    } else {
+                      next.add(l);
+                    }
+                    setSelectedLabels(next);
+                  }}
+                >
+                  {l}
+                </span>
+              );
+            })}
+        </div>
+      </div>
+      <div className="cards">
+        {(loading || browseLoading) && <div className="empty">Loading...</div>}
+        {!loading && !browseLoading && filteredCards.length === 0 && (
+          <div className="empty">
+            {mode === "gallery"
+              ? "No photos on this page yet."
+              : 'No results yet. Try "family" or "birthday".'}
+          </div>
+        )}
+        {!loading &&
+          !browseLoading &&
+          filteredCards.map((item) => {
+            const path = item.record.file.path.split("/").pop() || item.record.file.path;
+            const people = item.record.faces
+              .map((f) => f.person_id || f.label)
+              .filter(Boolean)
+              .join(", ");
+            const labels = Array.from(new Set(item.record.classifications.map((c) => c.label))).slice(0, 6);
+            const thumb = `${API_BASE}/thumb/${item.record.file.id}`;
+            return (
+              <div key={item.record.file.id} className="card">
+                <div className="flex-between">
+                  <strong className="truncate">{path}</strong>
+                  {item.score != null && <span className="pill small">Score {formatScore(item.score)}</span>}
+                </div>
+                <div className="thumb">
+                  <img src={thumb} alt={path} />
+                </div>
+                <div className="meta">{item.record.vision ? item.record.vision.description : "No caption"}</div>
+                {people && <div className="meta">People: {people}</div>}
+                <div className="row wrap">
+                  {labels.map((l) => (
+                    <span key={l} className="badge">
+                      {l}
+                    </span>
+                  ))}
+                </div>
+                <button type="button" className="secondary" onClick={() => openPhoto(item.record, item.score ?? undefined)}>
+                  Faces & context
+                </button>
+              </div>
+            );
+          })}
+      </div>
+      {mode === "gallery" && browseTotal > PAGE_SIZE && (
+        <div className="row space pager">
+          <button
+            type="button"
+            className="secondary"
+            disabled={browsePage === 0 || browseLoading}
+            onClick={() => browse(Math.max(0, browsePage - 1))}
+          >
+            Previous
+          </button>
+          <div className="muted small">
+            Page {browsePage + 1} / {Math.ceil(browseTotal / PAGE_SIZE)} ({browseTotal} photos)
+          </div>
+          <button
+            type="button"
+            className="secondary"
+            disabled={(browsePage + 1) * PAGE_SIZE >= browseTotal || browseLoading}
+            onClick={() => browse(browsePage + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </>
+  );
+
   return (
-    <div className="page">
-      <header className="header">
-        <div className="title-column">
+    <div className="app-shell">
+      <aside className="sidebar panel">
+        <div className="title-column sidebar-brand">
           <div className="title-row">
             <h1>Photo Brain</h1>
             <span className="pill">Local-first</span>
           </div>
-          <p className="subtitle">Agentic console for search, faces, and reindexing</p>
+          <p className="subtitle">Operator console for search, faces, and events</p>
+          <div className="muted small">API on port 8000</div>
         </div>
-        <div className="pill muted">API on port 8000</div>
-      </header>
-      <main className="grid">
-        <section className="panel">
-          <div className="panel-head">
-            <h3>Search</h3>
-            <div className="stat">
-              <div className="label">Results</div>
-              <div className="value">{mode === "browse" ? browseTotal : results.length}</div>
-            </div>
-          </div>
-          <form
-            className="stack"
-            onSubmit={(e) => {
-              e.preventDefault();
-              search(query);
-            }}
-          >
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="e.g. beach event:holiday person:alice after:2024-01-01"
-            />
-            <div className="row">
-              <button type="submit" disabled={loading}>
-                {loading ? "Searching..." : "Search"}
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => browse(0)}
-                disabled={browseLoading}
-              >
-                {browseLoading ? "Browsing..." : "Browse all"}
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => loadFaces(0)}
-                disabled={faceLoading}
-              >
-                {faceLoading ? "Loading faces..." : "Faces"}
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => {
-                  setQuery("");
-                  setResults([]);
-                  setBrowseRecords([]);
-                  setBrowseTotal(0);
-                  setFaceItems([]);
-                  setFaceTotal(0);
-                  setFacePage(0);
-                  setFaceLabelDrafts({});
-                  setFaceFilterPerson("");
-                  setFaceUnassignedOnly(true);
-                  setFaceError(null);
-                  setPersons([]);
-                  setMode("search");
-                  setSelectedLabels(new Set());
-                  setError(null);
-                  setSelectedPhoto(null);
-                  setSelectedScore(null);
-                  setFaceEdits({});
-                  setContextDraft("");
-                }}
-              >
-                Clear
-              </button>
-            </div>
-            {error && <div className="error">{error}</div>}
-          </form>
-          <div className="panel-head">
-            <h4>Maintenance</h4>
-          </div>
-          <div className="stack">
-            <div className="row">
-              <button type="button" className="secondary" onClick={() => runReindex("pending")}>
-                Reindex pending
-              </button>
-              <button type="button" className="secondary" onClick={() => runReindex("full")}>
-                Reindex all
-              </button>
-            </div>
-            {maintenanceStatus && <div className="muted small">{maintenanceStatus}</div>}
-            {maintenanceError && <div className="error">{maintenanceError}</div>}
-          </div>
+        <nav className="sidebar-nav">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`nav-item ${mode === item.id ? "active" : ""}`}
+              onClick={() => handleNav(item.id)}
+            >
+              <div className="nav-label">{item.label}</div>
+              <div className="nav-desc">{item.description}</div>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-section">
           <div className="panel-head">
             <h4>Events</h4>
-            <button type="button" className="secondary" onClick={fetchEvents}>
+            <button type="button" className="secondary compact" onClick={fetchEvents}>
               Refresh
             </button>
           </div>
-          <ul className="events">
-            {events.map((evt) => (
+          <ul className="events slim">
+            {events.slice(0, 8).map((evt) => (
               <li
                 key={evt.id}
                 onClick={() => {
-                  setQuery(`event:${evt.id} ${query}`);
-                  search(`event:${evt.id} ${query}`);
+                  setQuery(`event:${evt.id}`);
+                  search(`event:${evt.id}`);
                 }}
               >
                 <div className="row space">
-                  <span>{evt.title}</span>
-                  <span className="pill muted">{evt.photo_ids.length}</span>
+                  <span className="truncate">{evt.title}</span>
+                  <span className="pill small muted">{evt.photo_ids.length}</span>
                 </div>
               </li>
             ))}
-            {!events.length && <div className="muted">No events yet.</div>}
+            {!events.length && <div className="muted small">No events yet.</div>}
+            {events.length > 8 && <div className="muted small">More in Events view</div>}
           </ul>
-        </section>
-        <section className="panel">
-          <div className="panel-head">
-            <h3>Results</h3>
-            <div className="row wrap">
-              {Array.from(new Set(labelBadges))
-                .slice(0, 12)
-                .map((l) => {
-                  const active = selectedLabels.has(l);
-                  return (
-                    <span
-                      key={l}
-                      className={`badge ${active ? "active" : ""}`}
-                      onClick={() => {
-                        const next = new Set(selectedLabels);
-                        if (active) {
-                          next.delete(l);
-                        } else {
-                          next.add(l);
-                        }
-                        setSelectedLabels(next);
-                      }}
-                    >
-                      {l}
-                    </span>
-                  );
-                })}
-            </div>
+        </div>
+      </aside>
+      <div className="content">
+        <header className="page-header">
+          <div>
+            <div className="muted small">{pageSubline[mode]}</div>
+            <h2 className="page-title">{pageHeadline[mode]}</h2>
           </div>
-          {selectedPhoto && (
-            <div className="detail">
-              <div className="detail-head">
-                <div>
-                  <div className="muted">Selected photo</div>
-                  <div className="row wrap">
-                    <strong className="truncate">
-                      {selectedPhoto.file.path.split("/").pop() || selectedPhoto.file.path}
-                    </strong>
-                    {selectedScore != null && (
-                      <span className="pill small">Score {formatScore(selectedScore)}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="row">
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => setSelectedPhoto(null)}
-                  >
-                    Close
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => openPhoto(selectedPhoto, selectedScore ?? undefined)}
-                  >
-                    Refresh
-                  </button>
-                </div>
-              </div>
-              <div className="detail-body">
-                <div className="image-frame">
-                  <img
-                    src={selectedFullImage || selectedThumbImage || ""}
-                    alt="Selected"
-                    onLoad={(evt) => {
-                      setImageSize({
-                        width: evt.currentTarget.naturalWidth,
-                        height: evt.currentTarget.naturalHeight,
-                      });
-                    }}
-                    onError={(evt) => {
-                      if (selectedThumbImage && evt.currentTarget.src !== selectedThumbImage) {
-                        evt.currentTarget.src = selectedThumbImage;
-                      }
-                    }}
-                  />
-                  {imageSize &&
-                    (selectedPhoto.detections || [])
-                      .filter((det) => det.id != null)
-                      .map((det) => {
-                        if (!det.id || !imageSize.width || !imageSize.height) return null;
-                        const [x1, y1, x2, y2] = det.bbox;
-                        if (x2 <= x1 || y2 <= y1) return null;
-                        const left = (x1 / imageSize.width) * 100;
-                        const top = (y1 / imageSize.height) * 100;
-                        const width = ((x2 - x1) / imageSize.width) * 100;
-                        const height = ((y2 - y1) / imageSize.height) * 100;
-                        const label =
-                          faceEdits[det.id] ||
-                          facesByDetection.get(det.id)?.person_id ||
-                          facesByDetection.get(det.id)?.label ||
-                          `Face ${det.id}`;
-                        return (
-                          <div
-                            key={det.id}
-                            className={`face-box ${hoverDetectionId === det.id ? "active" : ""}`}
-                            style={{
-                              left: `${left}%`,
-                              top: `${top}%`,
-                              width: `${width}%`,
-                              height: `${height}%`,
-                            }}
-                          >
-                            <span className="face-label">{label}</span>
-                          </div>
-                        );
-                      })}
-                </div>
-                <div className="detail-meta">
-                  <div className="stack">
-                    <div>
-                      <div className="muted small">Caption</div>
-                      <div className="meta">
-                        {selectedPhoto.vision?.description || "No caption yet"}
-                      </div>
-                    </div>
-                    <div className="stack">
-                      <div className="muted small">User context</div>
-                      <textarea
-                        value={contextDraft}
-                        rows={3}
-                        onChange={(e) => setContextDraft(e.target.value)}
-                        placeholder="Add reminders, places, or who is in the scene"
-                      />
-                      <div className="row">
-                        <button type="button" onClick={saveContext} disabled={photoLoading}>
-                          {photoLoading ? "Saving..." : "Save context & reindex"}
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => setContextDraft(selectedPhoto.vision?.user_context || "")}
-                        >
-                          Reset
-                        </button>
-                      </div>
-                    </div>
-                    <div className="stack">
-                      <div className="muted small">Faces</div>
-                      {(selectedPhoto.detections || []).length === 0 && (
-                        <div className="muted">No face detections yet.</div>
-                      )}
-                      {(selectedPhoto.detections || []).map((det) => {
-                        const face = det.id ? facesByDetection.get(det.id) : undefined;
-                        const value = det.id ? faceEdits[det.id] ?? face?.person_id ?? face?.label ?? "" : "";
-                        return (
-                          <div
-                            key={det.id || `${det.bbox[0]}-${det.bbox[1]}`}
-                            className="face-row"
-                            onMouseEnter={() => det.id && setHoverDetectionId(det.id)}
-                            onMouseLeave={() => setHoverDetectionId(null)}
-                          >
-                            <div className="muted">ID {det.id ?? "?"}</div>
-                            <input
-                              type="text"
-                              value={value}
-                              onChange={(e) => {
-                                if (!det.id) return;
-                                setFaceEdits((prev) => ({ ...prev, [det.id!]: e.target.value }));
-                              }}
-                              placeholder="Name this face"
-                              onFocus={() => det.id && setHoverDetectionId(det.id)}
-                              onBlur={() => setHoverDetectionId(null)}
-                            />
-                            {det.id && (
-                              <button
-                                type="button"
-                                className="secondary"
-                                onClick={() => saveFaceLabel(det.id!)}
-                                disabled={photoLoading}
-                                onMouseEnter={() => setHoverDetectionId(det.id!)}
-                                onMouseLeave={() => setHoverDetectionId(null)}
-                              >
-                                Save name
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                      <div className="row wrap">
-                        <label className="muted small">
-                          <input
-                            type="checkbox"
-                            checked={preserveFaces}
-                            onChange={(e) => setPreserveFaces(e.target.checked)}
-                          />{" "}
-                          Preserve face identities on reindex
-                        </label>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={reindexSelected}
-                          disabled={photoLoading}
-                        >
-                          Reindex photo
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              {selectedError && <div className="error">{selectedError}</div>}
+          <div className="row wrap">
+            <div className="stat">
+              <div className="label">{primaryLabel}</div>
+              <div className="value">{primaryCount}</div>
             </div>
-          )}
-          {mode === "faces" ? (
+            {mode === "events" && (
+              <div className="stat">
+                <div className="label">Events</div>
+                <div className="value">{events.length}</div>
+              </div>
+            )}
+            <button type="button" className="secondary" onClick={resetUI}>
+              Reset view
+            </button>
+          </div>
+        </header>
+        <div className="content-body">
+          {mode === "search" && (
             <>
+              <section className="panel content-panel">
+                <div className="panel-head">
+                  <h3>Semantic search</h3>
+                  <div className="row wrap">
+                    <button type="button" className="secondary" onClick={() => handleNav("gallery")}>
+                      Gallery
+                    </button>
+                    <button type="button" className="secondary" onClick={() => handleNav("faces")}>
+                      Faces
+                    </button>
+                  </div>
+                </div>
+                <form
+                  className="stack"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    search(query);
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="e.g. beach event:holiday person:alice after:2024-01-01"
+                  />
+                  <div className="row wrap">
+                    <button type="submit" disabled={loading}>
+                      {loading ? "Searching..." : "Run search"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => browse(0)}
+                      disabled={browseLoading}
+                    >
+                      {browseLoading ? "Loading gallery..." : "Open gallery"}
+                    </button>
+                    <button type="button" className="secondary" onClick={resetUI}>
+                      Clear
+                    </button>
+                  </div>
+                  {error && <div className="error">{error}</div>}
+                </form>
+              </section>
+              <section className="panel content-panel">
+                {detailPanel}
+                {cardsContent}
+              </section>
+            </>
+          )}
+          {mode === "gallery" && (
+            <>
+              <section className="panel content-panel">
+                <div className="panel-head">
+                  <h3>Gallery</h3>
+                  <div className="row wrap">
+                    <button type="button" className="secondary" onClick={() => browse(0)} disabled={browseLoading}>
+                      {browseLoading ? "Loading..." : "Refresh gallery"}
+                    </button>
+                    <button type="button" className="secondary" onClick={() => handleNav("search")}>
+                      Back to search
+                    </button>
+                  </div>
+                </div>
+                <div className="row space muted small">
+                  <span>
+                    Page {browsePage + 1} / {Math.max(1, Math.ceil(Math.max(browseTotal, 1) / PAGE_SIZE))}
+                  </span>
+                  <div className="row wrap">
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      disabled={browsePage === 0 || browseLoading}
+                      onClick={() => browse(Math.max(0, browsePage - 1))}
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      disabled={(browsePage + 1) * PAGE_SIZE >= browseTotal || browseLoading}
+                      onClick={() => browse(browsePage + 1)}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </section>
+              <section className="panel content-panel">
+                {detailPanel}
+                {cardsContent}
+              </section>
+            </>
+          )}
+          {mode === "faces" && (
+            <section className="panel content-panel">
+              {detailPanel}
+              <div className="panel-head">
+                <h4>Suggested groups</h4>
+                <div className="row wrap">
+                  <button type="button" className="secondary" onClick={loadFaceGroups} disabled={faceGroupLoading}>
+                    {faceGroupLoading ? "Loading..." : "Refresh"}
+                  </button>
+                  <button type="button" className="secondary" onClick={rebuildFaceGroups} disabled={faceGroupLoading}>
+                    Rebuild suggestions
+                  </button>
+                </div>
+              </div>
+              {faceGroupError && <div className="error">{faceGroupError}</div>}
+              <div className="cards">
+                {faceGroupLoading && <div className="empty">Loading suggestions...</div>}
+                {!faceGroupLoading && faceGroups.length === 0 && (
+                  <div className="empty">No pending suggestions.</div>
+                )}
+                {!faceGroupLoading &&
+                  faceGroups.map((group) => {
+                    const exemplar = group.members[0];
+                    const cropId = exemplar?.detection.id;
+                    const thumb =
+                      cropId != null
+                        ? `${API_BASE}/faces/${cropId}/crop?size=420`
+                        : exemplar
+                        ? `${API_BASE}/thumb/${exemplar.photo.id}`
+                        : "";
+                    return (
+                      <div key={group.id} className="card">
+                        <div className="flex-between">
+                          <strong>Group of {group.size}</strong>
+                          <span className="pill small">
+                            {group.score_min != null && group.score_max != null
+                              ? `Sim ${group.score_min}-${group.score_max}`
+                              : "Similarity"}
+                          </span>
+                        </div>
+                        {thumb && (
+                          <div className="thumb">
+                            <img src={thumb} alt="Group sample" />
+                          </div>
+                        )}
+                        <div className="stack">
+                          <input
+                            type="text"
+                            value={faceGroupLabelDrafts[group.id] ?? ""}
+                            placeholder={group.suggested_label || "Name this person"}
+                            list="person-options"
+                            onChange={(e) =>
+                              setFaceGroupLabelDrafts((prev) => ({ ...prev, [group.id]: e.target.value }))
+                            }
+                          />
+                        <div className="row wrap">
+                          <button
+                            type="button"
+                            onClick={() => acceptFaceGroup(group)}
+                            disabled={savingGroupId === group.id}
+                          >
+                            {savingGroupId === group.id ? "Accepting..." : "Accept & merge"}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => rejectFaceGroup(group)}
+                            disabled={savingGroupId === group.id}
+                          >
+                            Reject
+                          </button>
+                          <div className="muted small">
+                            {group.suggested_label ? `Suggested: ${group.suggested_label}` : "No suggestion"}
+                          </div>
+                        </div>
+                      </div>
+                        <div className="row wrap">
+                          {group.members.map((m) => {
+                            const detId = m.detection.id ?? 0;
+                            const cropUrl =
+                              detId != null
+                                ? `${API_BASE}/faces/${detId}/crop?size=160`
+                                : `${API_BASE}/thumb/${m.photo.id}`;
+                            const path = m.photo.path.split("/").pop() || m.photo.path;
+                            return (
+                              <div key={`${group.id}-${detId}`} className="face-chip">
+                                <img src={cropUrl} alt={path} />
+                                <div className="muted small truncate">{path}</div>
+                                <button
+                                  type="button"
+                                  className="secondary compact"
+                                  onClick={() =>
+                                    openPhoto({
+                                      file: m.photo,
+                                      vision: undefined,
+                                      classifications: [],
+                                      detections: [m.detection],
+                                      faces: m.identity ? [m.identity] : [],
+                                    })
+                                  }
+                                >
+                                  Open
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
               <div className="panel-head">
                 <h4>Face assignment</h4>
                 <div className="row wrap">
@@ -863,10 +1299,7 @@ export default function App() {
                 <div className="row wrap">
                   <div style={{ flex: 1, minWidth: 200 }}>
                     <div className="muted small">Source (to merge from)</div>
-                    <select
-                      value={mergeSourcePerson}
-                      onChange={(e) => setMergeSourcePerson(e.target.value)}
-                    >
+                    <select value={mergeSourcePerson} onChange={(e) => setMergeSourcePerson(e.target.value)}>
                       <option value="">Select person</option>
                       {personOptions.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -877,10 +1310,7 @@ export default function App() {
                   </div>
                   <div style={{ flex: 1, minWidth: 200 }}>
                     <div className="muted small">Target (keep)</div>
-                    <select
-                      value={mergeTargetPerson}
-                      onChange={(e) => setMergeTargetPerson(e.target.value)}
-                    >
+                    <select value={mergeTargetPerson} onChange={(e) => setMergeTargetPerson(e.target.value)}>
                       <option value="">Select person</option>
                       {personOptions.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -898,7 +1328,7 @@ export default function App() {
               </div>
               {faceError && <div className="error">{faceError}</div>}
               <div className="faces-grid">
-                {(faceLoading || loading) && <div className="empty">Loading faces…</div>}
+                {(faceLoading || loading) && <div className="empty">Loading faces...</div>}
                 {!faceLoading && faceItems.length === 0 && (
                   <div className="empty">No faces found for this filter.</div>
                 )}
@@ -958,14 +1388,13 @@ export default function App() {
                               onClick={() => saveFaceLabelFromGrid(face)}
                               disabled={savingFaceId === detectionId}
                             >
-                              {savingFaceId === detectionId ? "Saving..." : "Save name"}
-                            </button>
-                            {face.identity?.person_id && (
-                              <span className="pill small">Current: {face.identity.person_id}</span>
-                            )}
-                            <span className="pill small">
-                              Confidence {formatScore(face.detection.confidence)}
-                            </span>
+                            {savingFaceId === detectionId ? "Saving..." : "Save name"}
+                          </button>
+                          {face.identity?.person_id && (
+                            <span className="pill small">Current: {face.identity.person_id}</span>
+                          )}
+                          {face.identity?.auto_assigned && <span className="pill small muted">Auto</span>}
+                            <span className="pill small">Confidence {formatScore(face.detection.confidence)}</span>
                             <span className="pill small truncate">{path}</span>
                           </div>
                         </div>
@@ -996,92 +1425,80 @@ export default function App() {
                   </button>
                 </div>
               )}
-            </>
-          ) : (
-            <>
-              <div className="cards">
-                {(loading || browseLoading) && <div className="empty">Loading…</div>}
-                {!loading && !browseLoading && cards.length === 0 && (
-                  <div className="empty">No results yet. Try “family” or “birthday”.</div>
-                )}
-                {!loading &&
-                  !browseLoading &&
-                  cards
-                    .filter((item) => {
-                      if (!selectedLabels.size) return true;
-                      const labels = item.record.classifications.map((c) => c.label);
-                      return Array.from(selectedLabels).every((l) => labels.includes(l));
-                    })
-                    .map((item) => {
-                      const path = item.record.file.path.split("/").pop() || item.record.file.path;
-                      const people = item.record.faces
-                        .map((f) => f.person_id || f.label)
-                        .filter(Boolean)
-                        .join(", ");
-                      const labels = Array.from(
-                        new Set(item.record.classifications.map((c) => c.label))
-                      ).slice(0, 6);
-                      const thumb = `${API_BASE}/thumb/${item.record.file.id}`;
-                      return (
-                        <div key={item.record.file.id} className="card">
-                          <div className="flex-between">
-                            <strong className="truncate">{path}</strong>
-                            {item.score != null && (
-                              <span className="pill small">Score {formatScore(item.score)}</span>
-                            )}
-                          </div>
-                          <div className="thumb">
-                            <img src={thumb} alt={path} />
-                          </div>
-                          <div className="meta">
-                            {item.record.vision ? item.record.vision.description : "No caption"}
-                          </div>
-                          {people && <div className="meta">People: {people}</div>}
-                          <div className="row wrap">
-                            {labels.map((l) => (
-                              <span key={l} className="badge">
-                                {l}
-                              </span>
-                            ))}
-                          </div>
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={() => openPhoto(item.record, item.score ?? undefined)}
-                          >
-                            Faces & context
-                          </button>
-                        </div>
-                      );
-                    })}
+            </section>
+          )}
+          {mode === "events" && (
+            <section className="panel content-panel">
+              <div className="panel-head">
+                <h3>Events</h3>
+                <button type="button" className="secondary" onClick={fetchEvents}>
+                  Refresh
+                </button>
               </div>
-              {mode === "browse" && browseTotal > PAGE_SIZE && (
-                <div className="row space pager">
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={browsePage === 0 || browseLoading}
-                    onClick={() => browse(Math.max(0, browsePage - 1))}
-                  >
-                    Previous
-                  </button>
-                  <div className="muted small">
-                    Page {browsePage + 1} / {Math.ceil(browseTotal / PAGE_SIZE)} ({browseTotal} photos)
+              <div className="stack">
+                {events.map((evt) => (
+                  <div key={evt.id} className="card">
+                    <div className="flex-between">
+                      <strong className="truncate">{evt.title}</strong>
+                      <span className="pill small">{evt.photo_ids.length} photos</span>
+                    </div>
+                    <div className="row wrap">
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => {
+                          const queryText = `event:${evt.id}`;
+                          setQuery(queryText);
+                          search(queryText);
+                        }}
+                      >
+                        Search this event
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => {
+                          setMode("gallery");
+                          browse(0);
+                        }}
+                      >
+                        Open gallery
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={(browsePage + 1) * PAGE_SIZE >= browseTotal || browseLoading}
-                    onClick={() => browse(browsePage + 1)}
-                  >
-                    Next
+                ))}
+                {!events.length && <div className="empty">No events yet.</div>}
+              </div>
+            </section>
+          )}
+          {mode === "admin" && (
+            <section className="panel content-panel">
+              <div className="panel-head">
+                <h3>Admin & maintenance</h3>
+                <button type="button" className="secondary" onClick={() => handleNav("search")}>
+                  Back to search
+                </button>
+              </div>
+              <div className="stack">
+                <div className="row wrap">
+                  <button type="button" className="secondary" onClick={() => runReindex("pending")}>
+                    Reindex pending
+                  </button>
+                  <button type="button" className="secondary" onClick={() => runReindex("full")}>
+                    Reindex all
                   </button>
                 </div>
-              )}
-            </>
+                {maintenanceStatus && <div className="muted small">{maintenanceStatus}</div>}
+                {maintenanceError && <div className="error">{maintenanceError}</div>}
+                <div className="muted small">
+                  Use this pane for operator workflows - reindex respects context and preserves faces when enabled on
+                  the photo detail.
+                </div>
+              </div>
+            </section>
           )}
-        </section>
-      </main>
+        </div>
+      </div>
     </div>
   );
 }

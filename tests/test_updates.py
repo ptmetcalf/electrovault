@@ -18,6 +18,7 @@ from photo_brain.index.updates import (
     assign_face_identity,
     merge_persons,
     rename_person,
+    set_detection_person,
     set_photo_user_context,
 )
 
@@ -126,3 +127,45 @@ def test_rename_and_merge_persons() -> None:
         assert merged.id == "b"
         link = session.scalar(select(FacePersonLinkRow).where(FacePersonLinkRow.detection_id == det.id))
         assert link is not None and link.person_id == "b"
+        identity = session.scalar(select(FaceIdentityRow).where(FaceIdentityRow.detection_id == det.id))
+        assert identity is not None and identity.person_label == "Bob"
+        assert session.get(PersonRow, "a") is None
+
+
+def test_reassign_deletes_empty_person() -> None:
+    SessionLocal = _session()
+    with SessionLocal() as session:
+        person_old = PersonRow(id="old", display_name="Old Name")
+        person_new = PersonRow(id="new", display_name="New Name")
+        photo = PhotoFileRow(
+            id="p4",
+            path="/tmp/p4.jpg",
+            sha256="w" * 64,
+            size_bytes=30,
+            mtime=datetime.now(timezone.utc),
+        )
+        det = FaceDetectionRow(
+            id=3,
+            photo=photo,
+            bbox_x1=0.0,
+            bbox_y1=0.0,
+            bbox_x2=1.0,
+            bbox_y2=1.0,
+            confidence=0.9,
+            encoding=[],
+        )
+        session.add_all([person_old, person_new, photo, det])
+        session.flush()
+        session.add(FacePersonLinkRow(detection_id=det.id, person_id=person_old.id))
+        session.add(FaceIdentityRow(detection_id=det.id, person_label=person_old.display_name))
+        session.commit()
+
+        set_detection_person(session, detection_id=det.id, person=person_new)
+        session.commit()
+
+        link = session.scalar(select(FacePersonLinkRow).where(FacePersonLinkRow.detection_id == det.id))
+        assert link is not None and link.person_id == person_new.id
+        identity = session.scalar(select(FaceIdentityRow).where(FaceIdentityRow.detection_id == det.id))
+        assert identity is not None and identity.person_label == person_new.display_name
+        # Old person should be pruned because no detections remain.
+        assert session.get(PersonRow, person_old.id) is None

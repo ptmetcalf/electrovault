@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from photo_brain.index.schema import (
@@ -81,10 +81,20 @@ def set_detection_person(
     link = session.scalar(
         select(FacePersonLinkRow).where(FacePersonLinkRow.detection_id == detection_id)
     )
+    old_person_id = link.person_id if link else None
     if link:
         link.person_id = person.id
     else:
         session.add(FacePersonLinkRow(detection_id=detection_id, person_id=person.id))
+
+    if old_person_id and old_person_id != person.id:
+        remaining = session.scalar(
+            select(func.count()).select_from(FacePersonLinkRow).where(FacePersonLinkRow.person_id == old_person_id)
+        )
+        if not remaining:
+            old_person = session.get(PersonRow, old_person_id)
+            if old_person:
+                session.delete(old_person)
 
     session.flush()
     return identity
@@ -142,6 +152,12 @@ def merge_persons(session: Session, source_id: str, target_id: str) -> PersonRow
             .where(FaceIdentityRow.detection_id.in_(detection_ids))
             .values(person_label=target.display_name)
         )
+    # Also update any loose identities carrying the source display name.
+    session.execute(
+        update(FaceIdentityRow)
+        .where(FaceIdentityRow.person_label == source.display_name)
+        .values(person_label=target.display_name)
+    )
     session.flush()
     session.delete(source)
     session.flush()

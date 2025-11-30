@@ -89,6 +89,7 @@ def list_face_identities(session: Session, photo_id: str) -> list[FaceIdentity]:
                 detection_id=face.detection_id,
                 label=label,
                 confidence=face.confidence,
+                auto_assigned=bool(getattr(face, "auto_assigned", False)),
                 created_at=face.created_at,
             )
         )
@@ -175,6 +176,7 @@ def list_face_previews(
                 detection_id=det_row.id,
                 label=person_row_obj.display_name,
                 confidence=identity_row.confidence if identity_row else None,
+                auto_assigned=bool(identity_row.auto_assigned) if identity_row else False,
                 created_at=identity_row.created_at if identity_row else link_row.created_at,
             )
         elif identity_row:
@@ -183,6 +185,7 @@ def list_face_previews(
                 detection_id=identity_row.detection_id,
                 label=identity_row.person_label,
                 confidence=identity_row.confidence,
+                auto_assigned=bool(identity_row.auto_assigned),
                 created_at=identity_row.created_at,
             )
         faces.append(

@@ -1,25 +1,92 @@
-.page {
+.app-shell {
   min-height: 100vh;
   max-width: 1600px;
   margin: 0 auto;
   padding: 24px 24px 48px;
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 18px;
 }
 
-.header {
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: sticky;
+  top: 16px;
+  align-self: start;
+}
+
+.sidebar-brand {
+  gap: 6px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nav-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01)) var(--surface-muted);
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+}
+
+.nav-item.active {
+  border-color: rgba(124, 58, 237, 0.5);
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.25), var(--shadow-md);
+}
+
+.nav-label {
+  font-weight: 700;
+}
+
+.nav-desc {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sidebar-section {
+  padding-top: 4px;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.page-header {
   padding: 18px 22px;
   border: 1px solid var(--border);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01))
-    var(--surface-elevated);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)) var(--surface-elevated);
   border-radius: var(--radius-lg);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   box-shadow: var(--shadow-md);
-  position: sticky;
-  top: 16px;
-  backdrop-filter: blur(12px);
-  z-index: 10;
+}
+
+.page-title {
+  margin: 4px 0 0 0;
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.content-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .title-row {
@@ -46,16 +113,8 @@
   gap: 2px;
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: 340px 1fr;
-  gap: 18px;
-  margin-top: 18px;
-}
-
 .panel {
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01))
-    var(--surface);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01)) var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 16px 16px 18px;
@@ -74,6 +133,10 @@
 .panel-head h3,
 .panel-head h4 {
   margin: 0;
+}
+
+.content-panel {
+  padding: 16px 16px 18px;
 }
 
 .stack {
@@ -147,6 +210,11 @@ button.secondary {
   box-shadow: none;
 }
 
+.compact {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
 button:hover {
   filter: brightness(1.04);
 }
@@ -206,6 +274,10 @@ button:disabled {
   margin: 0;
 }
 
+.events.slim li {
+  padding: 8px 0;
+}
+
 .events li {
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
@@ -233,8 +305,7 @@ button:disabled {
 }
 
 .card {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01))
-    var(--surface-muted);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01)) var(--surface-muted);
   padding: 14px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
@@ -274,8 +345,7 @@ button:disabled {
 }
 
 .face-card {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01))
-    var(--surface-muted);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01)) var(--surface-muted);
   padding: 14px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
@@ -301,6 +371,24 @@ button:disabled {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.face-chip {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 140px;
+  box-shadow: var(--shadow-sm);
+}
+
+.face-chip img {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
 }
 
 .flex-between {
@@ -418,11 +506,12 @@ button:disabled {
 }
 
 @media (max-width: 1100px) {
-  .grid {
+  .app-shell {
     grid-template-columns: 1fr;
+    padding: 18px 16px 32px;
   }
 
-  .header {
+  .sidebar {
     position: static;
   }
 }
@@ -430,9 +519,5 @@ button:disabled {
 @media (max-width: 900px) {
   .detail-body {
     grid-template-columns: 1fr;
-  }
-
-  .page {
-    padding: 18px 16px 32px;
   }
 }

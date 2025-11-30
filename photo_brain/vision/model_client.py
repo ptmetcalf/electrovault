@@ -139,10 +139,11 @@ def _call_vision_api(
                     response.get("prompt_eval_count"),
                     exc,
                 )
-                raise LocalModelError(f"Structured response was not JSON: {exc}") from exc
+                # Return raw content so callers can fall back to heuristic parsing.
+                return None, content
         if isinstance(content, dict):
             return content, content
-        raise LocalModelError("Structured response was not JSON object")
+        return None, content
     return content, content
 
 
@@ -364,6 +365,17 @@ def classify_vision(prompt: str, image_path: Path) -> Tuple[List[Tuple[str, Opti
                     parsed = None
 
     validated: _LLMResponse | None = None
+    if parsed is None and isinstance(raw_content, str):
+        # Best-effort salvage: find largest JSON object in the raw text.
+        try:
+            parsed = json.loads(raw_content)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", raw_content, flags=re.DOTALL)
+            if match:
+                try:
+                    parsed = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    parsed = None
     if isinstance(parsed, dict):
         try:
             validated = _LLMResponse.model_validate(parsed)

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
+from uuid import uuid4
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -175,6 +177,9 @@ class FaceDetectionRow(Base):
     identities: Mapped[list["FaceIdentityRow"]] = relationship(
         back_populates="detection", cascade="all, delete-orphan"
     )
+    group_memberships: Mapped[list["FaceGroupProposalMemberRow"]] = relationship(
+        back_populates="detection", cascade="all, delete-orphan"
+    )
 
 
 class FaceIdentityRow(Base):
@@ -186,6 +191,7 @@ class FaceIdentityRow(Base):
     )
     person_label: Mapped[str] = mapped_column(String, nullable=False)
     confidence: Mapped[Optional[float]] = mapped_column(Float)
+    auto_assigned: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -224,6 +230,45 @@ class FacePersonLinkRow(Base):
 
     detection: Mapped[FaceDetectionRow] = relationship()
     person: Mapped[PersonRow] = relationship(back_populates="links")
+
+
+class FaceGroupProposalRow(Base):
+    __tablename__ = "face_group_proposals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    suggested_label: Mapped[Optional[str]] = mapped_column(String)
+    score_min: Mapped[Optional[float]] = mapped_column(Float)
+    score_max: Mapped[Optional[float]] = mapped_column(Float)
+    score_mean: Mapped[Optional[float]] = mapped_column(Float)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    members: Mapped[list["FaceGroupProposalMemberRow"]] = relationship(
+        back_populates="proposal", cascade="all, delete-orphan"
+    )
+
+
+class FaceGroupProposalMemberRow(Base):
+    __tablename__ = "face_group_proposal_members"
+    __table_args__ = (UniqueConstraint("detection_id", name="uq_group_member_detection"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    proposal_id: Mapped[str] = mapped_column(
+        ForeignKey("face_group_proposals.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    detection_id: Mapped[int] = mapped_column(
+        ForeignKey("face_detections.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    similarity: Mapped[Optional[float]] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    proposal: Mapped[FaceGroupProposalRow] = relationship(back_populates="members")
+    detection: Mapped[FaceDetectionRow] = relationship(back_populates="group_memberships")
 
 
 class LocationLabelRow(Base):

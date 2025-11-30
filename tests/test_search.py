@@ -8,6 +8,7 @@ from photo_brain.events import group_events
 from photo_brain.index import (
     ExifDataRow,
     FaceIdentityRow,
+    FaceDetectionRow,
     PhotoFileRow,
     event_photos,
     init_db,
@@ -16,6 +17,7 @@ from photo_brain.index import (
 from photo_brain.index.vector_backend import PgVectorBackend
 from photo_brain.ingest import ingest_and_index
 from photo_brain.search import execute_search, plan_search
+from photo_brain.index.updates import assign_face_identity
 
 
 def test_plan_search_trims_text() -> None:
@@ -88,10 +90,23 @@ def test_execute_search_filters_by_person(tmp_path) -> None:
 
     with SessionLocal() as session:
         ingest_and_index(tmp_path, session, backend=backend)
-        identity = session.scalar(select(FaceIdentityRow))
         photo_row = session.scalar(select(PhotoFileRow))
-        assert identity is not None
         assert photo_row is not None
+        detection_id = session.scalar(select(FaceDetectionRow.id))
+        if detection_id is None:
+            det = FaceDetectionRow(
+                photo_id=photo_row.id,
+                bbox_x1=0.0,
+                bbox_y1=0.0,
+                bbox_x2=1.0,
+                bbox_y2=1.0,
+                confidence=0.9,
+                encoding=[0.1, 0.2, 0.3, 0.4],
+            )
+            session.add(det)
+            session.flush()
+            detection_id = det.id
+        identity = assign_face_identity(session, detection_id=detection_id, person_label="Alice")
         # Provide a fallback embedding so search can return results when vision is unavailable.
         backend.upsert_embedding(session, embed_description("portrait", photo_id=photo_row.id))
         session.commit()

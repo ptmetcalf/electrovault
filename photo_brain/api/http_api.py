@@ -3,7 +3,7 @@ import os
 from io import BytesIO
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
@@ -18,12 +18,16 @@ from photo_brain.index import (
     PhotoFileRow,
     assign_face_identity,
     assign_user_location,
+    accept_face_group,
     index_photo,
     init_db,
+    list_face_group_proposals,
     load_photo_record,
     list_face_previews,
     list_persons,
     merge_persons,
+    rebuild_face_group_proposals,
+    reject_face_group,
     rename_person,
     session_factory,
     set_photo_user_context,
@@ -115,6 +119,17 @@ class PersonMergeRequest(BaseModel):
     target_id: str
 
 
+class FaceGroupRebuildRequest(BaseModel):
+    threshold: float | None = None
+    unassigned_only: bool | None = None
+    limit: int | None = None
+
+
+class FaceGroupAcceptRequest(BaseModel):
+    target_person_id: str | None = None
+    target_label: str | None = None
+
+
 @app.get("/faces")
 def list_faces(
     *,
@@ -166,6 +181,60 @@ def merge_person_endpoint(req: PersonMergeRequest, session: Session = Depends(ge
     target = merge_persons(session, req.source_id, req.target_id)
     session.commit()
     return {"person": {"id": target.id, "display_name": target.display_name}}
+
+
+@app.post("/face_groups/rebuild")
+def rebuild_face_groups(
+    req: FaceGroupRebuildRequest = Body(default_factory=FaceGroupRebuildRequest),
+    session: Session = Depends(get_session),
+) -> dict:
+    proposals = rebuild_face_group_proposals(
+        session,
+        threshold=req.threshold,
+        unassigned_only=req.unassigned_only,
+        limit=req.limit,
+    )
+    session.commit()
+    return {"proposals": [p.id for p in proposals], "count": len(proposals)}
+
+
+@app.get("/face_groups")
+def get_face_groups(
+    status: str | None = Query("pending"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session),
+) -> dict:
+    proposals, total = list_face_group_proposals(
+        session, status=status, limit=limit, offset=offset
+    )
+    return {
+        "proposals": [p.model_dump() for p in proposals],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.post("/face_groups/{proposal_id}/accept")
+def accept_face_group_endpoint(
+    proposal_id: str, req: FaceGroupAcceptRequest, session: Session = Depends(get_session)
+) -> dict:
+    person = accept_face_group(
+        session,
+        proposal_id,
+        target_person_id=req.target_person_id,
+        target_label=req.target_label,
+    )
+    session.commit()
+    return {"person": {"id": person.id, "display_name": person.display_name}}
+
+
+@app.post("/face_groups/{proposal_id}/reject")
+def reject_face_group_endpoint(proposal_id: str, session: Session = Depends(get_session)) -> dict:
+    proposal = reject_face_group(session, proposal_id)
+    session.commit()
+    return {"proposal": {"id": proposal.id, "status": proposal.status}}
 
 
 @app.post("/reindex")
